@@ -95,7 +95,7 @@ def main():
 
     for i in range(0, len(names), PER_MESSAGE):
         chunk = names[i:i + PER_MESSAGE]
-        content = " ".join(f"`{n}`" for n in chunk)
+        content = " ".join(f"`discord.gg/{n}`" for n in chunk)
         send(webhook, content)
         print(f"  {i + len(chunk)}/{len(names)} gonderildi")
         time.sleep(DELAY)
