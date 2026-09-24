@@ -11,8 +11,12 @@ NE YAPMAZ:
   - Discord'a "bu isim bos mu / alinabilir mi" diye SORMAZ (musaitlik kontrolu YOK).
   - Arka planda calismaz; tek sefer calisir ve biter.
   - Hicbir seyi otomatik almaz / snipe etmez.
+
+Webhook adresi ilk acilista sorulur ve yanindaki config.txt dosyasina kaydedilir.
 """
 
+import os
+import sys
 import json
 import string
 import time
@@ -21,12 +25,34 @@ import urllib.request
 import urllib.error
 
 # ----------------- AYARLAR -----------------
-WEBHOOK_URL = "BURAYA_WEBHOOK_URL"                  # kendi Discord webhook adresin
 LENGTH      = 2                                     # hane sayisi
 CHARSET     = string.ascii_lowercase + string.digits  # a-z + 0-9 (istersen degistir)
 PER_MESSAGE = 50                                    # her mesajda kac isim olsun
 DELAY       = 1.0                                   # mesajlar arasi bekleme (sn)
+CONFIG_NAME = "config.txt"                          # webhook adresinin kaydedildigi dosya
 # -------------------------------------------
+
+
+def app_dir():
+    # Exe olarak paketlenince exe'nin yanini, script olarak calisinca script'in yanini kullan
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def load_webhook():
+    path = os.path.join(app_dir(), CONFIG_NAME)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            url = f.read().strip()
+            if url:
+                return url
+    url = input("Discord webhook adresini yapistir: ").strip()
+    if url:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(url)
+        print(f"Kaydedildi -> {path}")
+    return url
 
 
 def generate(charset, length):
@@ -59,8 +85,9 @@ def send(webhook_url, content):
 
 
 def main():
-    if "BURAYA" in WEBHOOK_URL:
-        print("Once WEBHOOK_URL'i kendi webhook adresinle degistir.")
+    webhook = load_webhook()
+    if not webhook:
+        print("Webhook girilmedi, cikiliyor.")
         return
 
     names = list(generate(CHARSET, LENGTH))
@@ -69,7 +96,7 @@ def main():
     for i in range(0, len(names), PER_MESSAGE):
         chunk = names[i:i + PER_MESSAGE]
         content = " ".join(f"`{n}`" for n in chunk)
-        send(WEBHOOK_URL, content)
+        send(webhook, content)
         print(f"  {i + len(chunk)}/{len(names)} gonderildi")
         time.sleep(DELAY)
 
@@ -77,4 +104,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        # Cift tiklayinca pencere hemen kapanmasin
+        try:
+            input("\nKapatmak icin Enter'a bas...")
+        except EOFError:
+            pass
