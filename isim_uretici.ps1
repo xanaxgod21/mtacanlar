@@ -67,14 +67,23 @@ $webhook = Get-Webhook
 if (-not $webhook) { Write-Host "Webhook girilmedi, cikiliyor."; return }
 
 Write-Host "$($names.Count) adet isim uretildi, webhook'a gonderiliyor..."
+$start    = Get-Date
+$msgCount = 0
 for ($i = 0; $i -lt $names.Count; $i += $PerMessage) {
     $end   = [Math]::Min($i + $PerMessage, $names.Count)
     $chunk = $names[$i..($end - 1)]
     $content = ($chunk | ForEach-Object { "discord.gg/$_" }) -join "`n"
     Send-Chunk $webhook $content
+    $msgCount++
     Write-Host "  $end/$($names.Count) gonderildi"
     Start-Sleep -Seconds $DelaySeconds
 }
+
+# --- Ozet (istatistik) ---
+$elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds, 1)
+$summary = "**Ozet** | Toplam link: $($names.Count) | Mesaj: $msgCount | Sure: ${elapsed}sn"
+Send-Chunk $webhook $summary
+Write-Host $summary
 
 Write-Host "Bitti."
 Read-Host "Kapatmak icin Enter'a bas" | Out-Null

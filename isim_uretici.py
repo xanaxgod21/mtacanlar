@@ -93,12 +93,21 @@ def main():
     names = list(generate(CHARSET, LENGTH))
     print(f"{len(names)} adet {LENGTH} haneli isim uretildi, webhook'a gonderiliyor...")
 
+    start = time.time()
+    msg_count = 0
     for i in range(0, len(names), PER_MESSAGE):
         chunk = names[i:i + PER_MESSAGE]
         content = "\n".join(f"discord.gg/{n}" for n in chunk)
         send(webhook, content)
+        msg_count += 1
         print(f"  {i + len(chunk)}/{len(names)} gonderildi")
         time.sleep(DELAY)
+
+    # --- Ozet (istatistik) ---
+    elapsed = round(time.time() - start, 1)
+    summary = f"**Ozet** | Toplam link: {len(names)} | Mesaj: {msg_count} | Sure: {elapsed}sn"
+    send(webhook, summary)
+    print(summary)
 
     print("Bitti.")
 
