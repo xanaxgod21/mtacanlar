@@ -70,7 +70,7 @@ Write-Host "$($names.Count) adet isim uretildi, webhook'a gonderiliyor..."
 for ($i = 0; $i -lt $names.Count; $i += $PerMessage) {
     $end   = [Math]::Min($i + $PerMessage, $names.Count)
     $chunk = $names[$i..($end - 1)]
-    $content = ($chunk | ForEach-Object { "${tick}discord.gg/$_${tick}" }) -join " "
+    $content = ($chunk | ForEach-Object { "discord.gg/$_" }) -join "`n"
     Send-Chunk $webhook $content
     Write-Host "  $end/$($names.Count) gonderildi"
     Start-Sleep -Seconds $DelaySeconds
