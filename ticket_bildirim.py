@@ -3,8 +3,8 @@
 Ticket bildirim botu (normal Discord BOT hesabi ile calisir, selfbot DEGIL).
 
 NE YAPAR:
-  - Sunucuda yeni bir ticket kanali acildiginda (belirledigin kategoride ya da
-    adi belirledigin onekle baslayan) sana haber verir:
+  - Belirledigin kategoride yeni bir kanal acildiginda (istersen sadece adi
+    belirledigin onekle baslayanlar) sana haber verir:
       * webhook'una mesaj atar (telefonda bildirim olarak duser)
       * istersen sana DM de atar
   - Mesajda kanala tek tikla gitmen icin link olur, claim'e SEN basarsin.
@@ -66,7 +66,7 @@ def load_config():
         "category_ids": parse_ids(ask("Ticket kategori ID'leri (virgulle, bos = hepsi): ")),
         "name_prefixes": [
             p.strip().lower()
-            for p in ask("Kanal adi onekleri (virgulle, varsayilan: ticket-): ", "ticket-").split(",")
+            for p in ask("Kanal adi onekleri (virgulle, bos = kategorideki her kanal): ").split(",")
             if p.strip()
         ],
         "webhook_url": ask("Bildirim webhook adresi (bos = kullanma): "),

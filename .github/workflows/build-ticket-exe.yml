@@ -1,0 +1,37 @@
+name: Build Ticket Bildirim EXE
+
+# Windows makinede ticket_bildirim.py'yi tek dosyalik .exe olarak derler
+# ve sonucu indirilebilir artifact olarak yukler.
+
+on:
+  workflow_dispatch:      # Actions sekmesinden elle calistirilir
+  push:
+    branches:
+      - claude/optimistic-einstein-8g17cw
+    paths:
+      - ticket_bildirim.py
+      - .github/workflows/build-ticket-exe.yml
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyinstaller discord.py
+
+      - name: Build EXE
+        run: pyinstaller --onefile --console --name ticket_bildirim ticket_bildirim.py
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: ticket_bildirim-windows
+          path: dist/ticket_bildirim.exe
