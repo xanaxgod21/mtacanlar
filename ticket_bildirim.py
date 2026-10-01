@@ -53,6 +53,11 @@ try:
 except ImportError:
     discord = None
 
+try:
+    import pystray
+except Exception:
+    pystray = None
+
 CONFIG_NAME = "ticket_config.json"
 SOUND_NAME  = "bildirim.wav"   # exe'nin yanina koyarsan bu ses calar
 BG_NAME     = "arka_plan.jpg"  # exe'nin yanina ayni isimle koyarsan arka plan o olur
@@ -290,6 +295,96 @@ def flash_window(root):
         ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
     except Exception:
         pass
+
+
+# ----------------- kullanim kolayligi: tek kopya, otomatik baslatma, kisayol -----------------
+
+AUTOSTART_NAME = "TicketAlarm"
+AUTOSTART_ARG = "--autostart"
+HOTKEYS = {  # id: (tus adi, Windows modifier, sanal tus kodu, olay)
+    1: ("Ctrl+F9", 0x0002, 0x78, "open_last"),
+    2: ("Ctrl+F10", 0x0002, 0x79, "silence"),
+}
+_mutex = None
+
+
+def already_running():
+    # Ayni anda iki kopya calismasin (biri Windows acilisindan, biri elle acilmis olabilir)
+    global _mutex
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\TicketAlarmTekKopya")
+        return ctypes.windll.kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+    except Exception:
+        return False
+
+
+def autostart_command():
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}" {AUTOSTART_ARG}'
+    pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    exe = pyw if os.path.exists(pyw) else sys.executable
+    return f'"{exe}" "{os.path.abspath(__file__)}" {AUTOSTART_ARG}'
+
+
+def set_autostart(enabled):
+    """Windows acilinca programi baslatir (sadece bu kullanici, yonetici izni gerekmez)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                             r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+        if enabled:
+            winreg.SetValueEx(key, AUTOSTART_NAME, 0, winreg.REG_SZ, autostart_command())
+        else:
+            try:
+                winreg.DeleteValue(key, AUTOSTART_NAME)
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(key)
+        return True
+    except Exception:
+        return False
+
+
+class HotkeyListener:
+    """Program arka plandayken bile calisan kisayol tuslari (RegisterHotKey)."""
+
+    def __init__(self, on_key):
+        self.on_key = on_key
+        self.thread_id = None
+        self.failed = []
+
+    def start(self):
+        if sys.platform != "win32":
+            return
+        ready = threading.Event()
+        threading.Thread(target=self._run, args=(ready,), daemon=True).start()
+        ready.wait(2)
+
+    def _run(self, ready):
+        import ctypes
+        from ctypes import wintypes
+        user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+        self.thread_id = kernel32.GetCurrentThreadId()
+        for hid, (name, mod, vk, _event) in HOTKEYS.items():
+            if not user32.RegisterHotKey(None, hid, mod | 0x4000, vk):  # 0x4000 = tekrar etme
+                self.failed.append(name)
+        ready.set()
+        msg = wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            if msg.message == 0x0312 and msg.wParam in HOTKEYS:  # WM_HOTKEY
+                self.on_key(HOTKEYS[msg.wParam][3])
+        for hid in HOTKEYS:
+            user32.UnregisterHotKey(None, hid)
+
+    def stop(self):
+        if self.thread_id:
+            import ctypes
+            ctypes.windll.user32.PostThreadMessageW(self.thread_id, 0x0012, 0, 0)  # WM_QUIT
 
 
 # ----------------- bot (arka plan thread'i) -----------------
@@ -551,6 +646,13 @@ class App:
         self.sound_file = cfg.get("sound_file", "")
         self.bring_front = tk.BooleanVar(value=bool(cfg.get("bring_front", True)))
         self.win_toast = tk.BooleanVar(value=bool(cfg.get("windows_toast", True)))
+        self.to_tray = tk.BooleanVar(value=bool(cfg.get("minimize_to_tray", True)))
+        self.autostart = tk.BooleanVar(value=bool(cfg.get("autostart", False)))
+        self.hotkeys_on = tk.BooleanVar(value=bool(cfg.get("hotkeys", True)))
+        self.last_link = None
+        self.tray = None
+        self.tray_hint_shown = False
+        self.hotkeys = None
         self.toast_icon = ""
         self.bg_image = load_bg()
 
@@ -572,6 +674,8 @@ class App:
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.after(100, self.poll_events)
         root.after(500, self.tick)
+        self._start_tray()
+        self.apply_hotkeys()
 
         if discord is None:
             self.set_status("discord.py yok", ACCENT)
@@ -676,6 +780,7 @@ class App:
         out = Image.new("RGBA", img.size, (0, 0, 0, 0))
         ImageDraw.Draw(out).ellipse((0, 0, big - 1, big - 1), fill=hex_rgb(ACCENT) + (255,))
         out.paste(img, (0, 0), mask)
+        self.icon_image = out
         try:
             self.toast_icon = os.path.join(tempfile.gettempdir(), "ticket_alarm_icon.png")
             out.save(self.toast_icon)
@@ -857,6 +962,21 @@ class App:
                             fg_color=BORDER)
         sw2.grid(row=6, column=0, sticky="w", padx=18, pady=(8, 16))
         self.inputs.append(sw2)
+
+        keys = "   •   ".join(f"{name}: {'son ticket' if ev == 'open_last' else 'sesi sustur'}"
+                              for name, _m, _v, ev in HOTKEYS.values())
+        c = self._section(body, "⌘", "Kullanim", "Program arka planda sessizce calissin.")
+        for i, (var, text, cmd) in enumerate((
+            (self.to_tray, "Kapatinca sistem tepsisine kucult (arka planda calismaya devam eder)", None),
+            (self.autostart, "Windows acilinca otomatik baslat (tepside acilir ve izlemeye baslar)", self.apply_autostart),
+            (self.hotkeys_on, f"Kisayol tuslari  ({keys})", self.apply_hotkeys),
+        )):
+            sw = ctk.CTkSwitch(c, text=text, variable=var, font=font(12), text_color=TEXT,
+                               progress_color=ACCENT, button_color=TEXT, button_hover_color="white",
+                               fg_color=BORDER, command=cmd)
+            sw.grid(row=2 + i, column=0, sticky="w", padx=18, pady=(12 if i == 0 else 8, 16 if i == 2 else 0))
+            if sys.platform != "win32" and cmd is not None:
+                sw.configure(state="disabled")
         outer_item = self._window(tag, outer)
 
         save_btn = ctk.CTkButton(self.canvas, text="✓  KAYDET", width=140, height=42, corner_radius=0,
@@ -961,6 +1081,9 @@ class App:
             "sound_file": self.sound_file,
             "bring_front": bool(self.bring_front.get()),
             "windows_toast": bool(self.win_toast.get()),
+            "minimize_to_tray": bool(self.to_tray.get()),
+            "autostart": bool(self.autostart.get()),
+            "hotkeys": bool(self.hotkeys_on.get()),
         }
 
     def save(self):
@@ -1040,6 +1163,7 @@ class App:
         self.count += 1
         self.stat_count.set(f"{self.count} ticket")
         self.log(f"Yeni ticket: #{name} ({guild})")
+        self.last_link = link
 
         play_sound(cfg.get("sound_repeat", 1), cfg.get("sound_file", ""))
         if cfg.get("windows_toast", True):
@@ -1085,6 +1209,7 @@ class App:
                     if problems:
                         self.set_status("Uyari var", YELLOW)
                         self.log(problems[0])
+                        self.show_window()
                         messagebox.showwarning(APP_NAME, "Bot calisiyor ama su sorunlar var:\n\n- "
                                                + "\n\n- ".join(problems))
                     else:
@@ -1095,7 +1220,15 @@ class App:
                                            "Bildirimler'de bildirimlerin acik oldugundan emin ol.")
                 elif kind == "error":
                     self.log(data[0])
+                    self.show_window()
                     messagebox.showerror(APP_NAME, data[0])
+                elif kind == "tray":
+                    self.on_tray(data[0])
+                elif kind == "hotkey":
+                    if data[0] == "open_last":
+                        self.open_last()
+                    elif data[0] == "silence":
+                        stop_sound()
                 elif kind == "stopped":
                     self.runner = None
                     self.started_at = None
@@ -1108,17 +1241,113 @@ class App:
             pass
         self.root.after(100, self.poll_events)
 
+    # --- tepsi, kisayol, otomatik baslatma ---
+    def _start_tray(self):
+        if pystray is None or sys.platform != "win32":
+            return
+        image = getattr(self, "icon_image", None) or Image.new("RGB", (64, 64), hex_rgb(ACCENT))
+        send = lambda action: (lambda icon, item: self.events.put(("tray", action)))
+        menu = pystray.Menu(
+            pystray.MenuItem("Goster", send("show"), default=True),
+            pystray.MenuItem("Son ticket'i ac", send("open_last"),
+                             enabled=lambda item: self.last_link is not None),
+            pystray.MenuItem("Sesi sustur", send("silence")),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(lambda item: "Durdur" if self.runner else "Baslat", send("toggle")),
+            pystray.MenuItem("Cikis", send("quit")),
+        )
+        try:
+            self.tray = pystray.Icon("ticket_alarm", image, APP_NAME, menu)
+            self.tray.run_detached()
+        except Exception:
+            self.tray = None
+
+    def on_tray(self, action):
+        if action == "show":
+            self.show_window()
+        elif action == "open_last":
+            self.open_last()
+        elif action == "silence":
+            stop_sound()
+        elif action == "toggle":
+            self.toggle_run()
+        elif action == "quit":
+            self.quit()
+
+    def show_window(self):
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def open_last(self):
+        if self.last_link:
+            stop_sound()
+            open_link(*self.last_link)
+            self.hide_toast()
+
+    def apply_hotkeys(self):
+        if self.hotkeys:
+            self.hotkeys.stop()
+            self.hotkeys = None
+        if self.hotkeys_on.get() and sys.platform == "win32":
+            self.hotkeys = HotkeyListener(lambda ev: self.events.put(("hotkey", ev)))
+            self.hotkeys.start()
+            if self.hotkeys.failed:
+                self.log("Kisayol baska bir program tarafindan kullaniliyor: " + ", ".join(self.hotkeys.failed))
+
+    def apply_autostart(self):
+        if not set_autostart(bool(self.autostart.get())):
+            self.log("Windows acilisina eklenemedi.")
+        try:
+            save_config(self.collect_config())
+        except Exception:
+            pass
+
     def on_close(self):
+        # X'e basinca: tepsi aciksa arka plana in, degilse tamamen kapat
+        if self.tray and self.to_tray.get():
+            self.root.withdraw()
+            if not self.tray_hint_shown:
+                self.tray_hint_shown = True
+                try:
+                    self.tray.notify("Program arka planda calismaya devam ediyor. "
+                                     "Saatin yanindaki simgeden acabilirsin.", APP_NAME)
+                except Exception:
+                    pass
+            return
+        self.quit()
+
+    def quit(self):
         stop_sound()
         if self.runner:
             self.runner.stop()
+        if self.hotkeys:
+            self.hotkeys.stop()
+        if self.tray:
+            try:
+                self.tray.stop()
+            except Exception:
+                pass
         self.root.destroy()
 
 
 def main():
+    if already_running():
+        r = tk.Tk()
+        r.withdraw()
+        messagebox.showinfo(APP_NAME, "Ticket Alarm zaten acik.\nSaatin yanindaki simgesinden acabilirsin.")
+        r.destroy()
+        return
     ctk.set_appearance_mode("dark")
     root = ctk.CTk()
-    App(root)
+    app = App(root)
+    if AUTOSTART_ARG in sys.argv:
+        # Windows acilisinda: pencere acilmadan tepside basla ve izlemeye gec
+        if app.tray:
+            root.withdraw()
+        cfg = app.collect_config()
+        if cfg["token"] and cfg["category_ids"]:
+            root.after(500, app.start)
     root.mainloop()
 
 
