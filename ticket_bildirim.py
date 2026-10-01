@@ -330,9 +330,10 @@ def autostart_command():
 
 
 def set_autostart(enabled):
-    """Windows acilinca programi baslatir (sadece bu kullanici, yonetici izni gerekmez)."""
+    """Windows acilinca programi baslatir (sadece bu kullanici, yonetici izni gerekmez).
+    Basariliysa None, degilse hata mesaji doner."""
     if sys.platform != "win32":
-        return False
+        return "sadece Windows'ta calisir"
     try:
         import winreg
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
@@ -345,9 +346,9 @@ def set_autostart(enabled):
             except FileNotFoundError:
                 pass
         winreg.CloseKey(key)
-        return True
-    except Exception:
-        return False
+        return None
+    except Exception as e:
+        return str(e) or e.__class__.__name__
 
 
 class HotkeyListener:
@@ -1296,8 +1297,9 @@ class App:
                 self.log("Kisayol baska bir program tarafindan kullaniliyor: " + ", ".join(self.hotkeys.failed))
 
     def apply_autostart(self):
-        if not set_autostart(bool(self.autostart.get())):
-            self.log("Windows acilisina eklenemedi.")
+        err = set_autostart(bool(self.autostart.get()))
+        if err:
+            self.log(f"Windows acilisina eklenemedi: {err}")
         try:
             save_config(self.collect_config())
         except Exception:

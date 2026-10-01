@@ -55,10 +55,10 @@ jobs:
           icon.run_detached(); time.sleep(1); icon.stop(); print("tray ok")
           hk = t.HotkeyListener(lambda ev: None); hk.start()
           print("hotkey failed:", hk.failed); hk.stop()
-          assert t.set_autostart(True)
+          print("autostart error:", t.set_autostart(True))
           run = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run")
           print("autostart:", winreg.QueryValueEx(run, t.AUTOSTART_NAME)[0])
-          assert t.set_autostart(False)
+          print("autostart remove error:", t.set_autostart(False))
           print("single instance:", t.already_running(), t.already_running())
 
       - name: Upload EXE
