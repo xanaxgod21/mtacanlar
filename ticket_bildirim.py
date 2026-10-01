@@ -5,7 +5,9 @@ Ticket bildirim botu (normal Discord BOT hesabi ile calisir, selfbot DEGIL).
 NE YAPAR:
   - Belirledigin kategoride yeni bir kanal acildiginda (istersen sadece adi
     belirledigin onekle baslayanlar) sana haber verir:
-      * webhook'una mesaj atar (telefonda bildirim olarak duser)
+      * bilgisayarda bildirim sesi calar ve pencere yanip soner
+        (exe'nin yanina "bildirim.wav" koyarsan o ses calar)
+      * istersen webhook'una mesaj atar (telefonda bildirim olarak duser)
       * istersen sana DM de atar
   - Mesajda kanala tek tikla gitmen icin link olur, claim'e SEN basarsin.
 
@@ -29,6 +31,7 @@ KURULUM:
 import os
 import sys
 import json
+import threading
 
 try:
     import discord
@@ -37,6 +40,7 @@ except ImportError:
     sys.exit(1)
 
 CONFIG_NAME = "ticket_config.json"
+SOUND_NAME  = "bildirim.wav"   # exe'nin yanina koyarsan bu ses calar
 
 
 def app_dir():
@@ -72,11 +76,61 @@ def load_config():
         "webhook_url": ask("Bildirim webhook adresi (bos = kullanma): "),
         "dm_user_ids": parse_ids(ask("DM atilacak kullanici ID'leri (virgulle, bos = DM yok): ")),
         "ping_user_id": ask("Webhook mesajinda etiketlenecek kullanici ID'si (bos = etiket yok): "),
+        "sound_repeat": int(ask("Bildirim sesi kac kez calsin (varsayilan 3, 0 = ses yok): ", "3") or 0),
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
     print(f"Kaydedildi -> {path}\n")
     return cfg
+
+
+def flash_window():
+    # Konsol penceresini gorev cubugunda, pencereye tiklayana kadar yakip sondurur
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class FLASHWINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.UINT),
+                ("hwnd", wintypes.HWND),
+                ("dwFlags", wintypes.DWORD),
+                ("uCount", wintypes.UINT),
+                ("dwTimeout", wintypes.DWORD),
+            ]
+
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            FLASHW_ALL, FLASHW_TIMERNOFG = 0x3, 0xC
+            info = FLASHWINFO(ctypes.sizeof(FLASHWINFO), hwnd, FLASHW_ALL | FLASHW_TIMERNOFG, 0, 0)
+            ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
+    except Exception:
+        pass
+
+
+def play_sound(repeat):
+    if repeat <= 0:
+        return
+    if sys.platform != "win32":
+        print("\a", end="", flush=True)
+        return
+
+    import winsound
+    wav = os.path.join(app_dir(), SOUND_NAME)
+
+    def run():
+        for _ in range(repeat):
+            try:
+                if os.path.exists(wav):
+                    winsound.PlaySound(wav, winsound.SND_FILENAME)
+                else:
+                    winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
+            except Exception:
+                winsound.MessageBeep()
+
+    # Ayri thread'de cal ki bot beklemesin
+    threading.Thread(target=run, daemon=True).start()
+    flash_window()
 
 
 def is_ticket(channel, cfg):
@@ -96,8 +150,9 @@ def main():
     if not cfg.get("token"):
         print("Token girilmedi, cikiliyor.")
         return
-    if not cfg.get("webhook_url") and not cfg.get("dm_user_ids"):
-        print("Ne webhook ne DM ayarli; bildirim gidecek yer yok, cikiliyor.")
+    sound_repeat = int(cfg.get("sound_repeat", 3) or 0)
+    if not sound_repeat and not cfg.get("webhook_url") and not cfg.get("dm_user_ids"):
+        print("Ses, webhook ve DM kapali; bildirim gidecek yer yok, cikiliyor.")
         return
 
     intents = discord.Intents.none()
@@ -116,6 +171,7 @@ def main():
         link = f"https://discord.com/channels/{channel.guild.id}/{channel.id}"
         text = f"Yeni ticket: **#{channel.name}** ({channel.guild.name})\n{link}"
         print(text.replace("**", ""))
+        play_sound(sound_repeat)
 
         if cfg.get("webhook_url"):
             ping = cfg.get("ping_user_id")
