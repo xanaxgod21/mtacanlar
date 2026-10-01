@@ -209,6 +209,7 @@ def windows_toast(title, body, app_link, icon=""):
         f'</toast>'
     )
     ps = (
+        "$ProgressPreference = 'SilentlyContinue'\n"
         "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null\n"
         "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null\n"
         "$x = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
