@@ -4,9 +4,9 @@ Ticket alarm - arayuzlu (normal Discord BOT hesabi ile calisir, selfbot DEGIL).
 
 NE YAPAR:
   - Belirledigin kategoride yeni bir kanal acildiginda bu bilgisayarda
-    sesli bildirim verir, pencere yanip soner ve ekranda uyari cikar.
-  - Gelen ticket'lar listede gorunur, "Kanala git" ile kanal acilir.
-    Claim'e SEN basarsin.
+    sesli bildirim verir, sagdan Windows bildirimi cikar, pencere yanip soner.
+  - Windows bildirimine ya da "Kanala git"e tiklayinca Discord uygulamasi
+    o ticket kanalinda acilir. Claim'e SEN basarsin.
 
 NE YAPMAZ:
   - Hicbir butona basmaz, ticket'i claimlemez, kanala yazmaz.
@@ -30,6 +30,10 @@ import os
 import sys
 import json
 import time
+import base64
+import tempfile
+import subprocess
+from xml.sax.saxutils import escape
 import queue
 import asyncio
 import threading
@@ -122,6 +126,17 @@ def is_ticket(channel, cfg):
             and channel.category_id in (cfg.get("category_ids") or []))
 
 
+_sound_stop = threading.Event()
+
+
+def sound_path(sound_file=""):
+    # Sira: secilen dosya > exe'nin yanindaki bildirim.wav > exe'nin icindeki ses
+    for path in (sound_file, resource(SOUND_NAME)):
+        if path and os.path.exists(path):
+            return path
+    return ""
+
+
 def play_sound(repeat, sound_file=""):
     if repeat <= 0:
         return
@@ -130,12 +145,16 @@ def play_sound(repeat, sound_file=""):
         return
 
     import winsound
-    wav = sound_file if sound_file and os.path.exists(sound_file) else os.path.join(app_dir(), SOUND_NAME)
+    wav = sound_path(sound_file)
+    stop_sound()
+    _sound_stop.clear()
 
     def run():
         for _ in range(repeat):
+            if _sound_stop.is_set():
+                break
             try:
-                if os.path.exists(wav):
+                if wav:
                     winsound.PlaySound(wav, winsound.SND_FILENAME)
                 else:
                     winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
@@ -144,6 +163,68 @@ def play_sound(repeat, sound_file=""):
 
     # Ayri thread'de cal ki arayuz donmasin
     threading.Thread(target=run, daemon=True).start()
+
+
+def stop_sound():
+    _sound_stop.set()
+    if sys.platform == "win32":
+        try:
+            import winsound
+            winsound.PlaySound(None, 0)
+        except Exception:
+            pass
+
+
+def open_link(app_link, web_link):
+    # Discord uygulamasinda ac; uygulama yoksa tarayicida ac
+    if sys.platform == "win32":
+        try:
+            os.startfile(app_link)
+            return
+        except OSError:
+            pass
+    webbrowser.open(web_link)
+
+
+# Windows'un hazir PowerShell kimligi: ayrica kayit gerektirmeden bildirim gosterebilir
+TOAST_APP_ID = r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
+
+
+def windows_toast(title, body, app_link, icon=""):
+    """Sag alttan Windows bildirimi; tiklayinca app_link (discord://) acilir."""
+    if sys.platform != "win32":
+        return
+    link = escape(app_link, {'"': "&quot;"})
+    img = ""
+    if icon:
+        src = escape("file:///" + icon.replace("\\", "/"), {'"': "&quot;"})
+        img = f'<image placement="appLogoOverride" hint-crop="circle" src="{src}"/>'
+    xml = (
+        f'<toast activationType="protocol" launch="{link}" duration="long">'
+        f'<visual><binding template="ToastGeneric">'
+        f'<text>{escape(title)}</text><text>{escape(body)}</text>{img}'
+        f'</binding></visual>'
+        f'<audio silent="true"/>'
+        f'<actions><action content="Ticket\'a git" activationType="protocol" arguments="{link}"/></actions>'
+        f'</toast>'
+    )
+    ps = (
+        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null\n"
+        "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null\n"
+        "$x = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
+        "$x.LoadXml(@'\n" + xml + "\n'@)\n"
+        "$t = [Windows.UI.Notifications.ToastNotification]::new($x)\n"
+        f"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{TOAST_APP_ID}').Show($t)\n"
+    )
+    encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+    try:
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-WindowStyle", "Hidden", "-EncodedCommand", encoded],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:
+        pass
 
 
 def flash_window(root):
@@ -208,7 +289,8 @@ class BotRunner:
         @client.event
         async def on_guild_channel_create(channel):
             if is_ticket(channel, cfg):
-                link = f"https://discord.com/channels/{channel.guild.id}/{channel.id}"
+                path = f"channels/{channel.guild.id}/{channel.id}"
+                link = (f"discord://-/{path}", f"https://discord.com/{path}")
                 self._emit("ticket", channel.guild.name, channel.name, link)
 
         try:
@@ -362,7 +444,7 @@ class TicketRow(ctk.CTkFrame):
         ctk.CTkButton(self, text="Kanala git  ›", width=112, height=34, corner_radius=8,
                       font=font(12, "bold"), fg_color=ACCENT, hover_color=ACCENT_H,
                       border_width=1, border_color=GLOW,
-                      command=lambda: webbrowser.open(link)).grid(
+                      command=lambda: (stop_sound(), open_link(*link))).grid(
             row=0, column=2, rowspan=2, padx=12)
 
         # Yeni gelen satir bir sure vurgulu kalir, sonra sakinlesir
@@ -401,9 +483,11 @@ class App:
             "token": tk.StringVar(value=cfg.get("token", "")),
             "category_ids": tk.StringVar(value=ids_to_text(cfg.get("category_ids"))),
         }
-        self.sound_repeat = tk.IntVar(value=int(cfg.get("sound_repeat", 3) or 0))
+        self.sound_repeat = tk.IntVar(value=int(cfg.get("sound_repeat", 1) or 0))
         self.sound_file = cfg.get("sound_file", "")
         self.bring_front = tk.BooleanVar(value=bool(cfg.get("bring_front", True)))
+        self.win_toast = tk.BooleanVar(value=bool(cfg.get("windows_toast", True)))
+        self.toast_icon = ""
         self.bg_image = load_bg()
 
         root.columnconfigure(1, weight=1)
@@ -528,6 +612,11 @@ class App:
         out = Image.new("RGBA", img.size, (0, 0, 0, 0))
         ImageDraw.Draw(out).ellipse((0, 0, big - 1, big - 1), fill=hex_rgb(ACCENT) + (255,))
         out.paste(img, (0, 0), mask)
+        try:
+            self.toast_icon = os.path.join(tempfile.gettempdir(), "ticket_alarm_icon.png")
+            out.save(self.toast_icon)
+        except Exception:
+            self.toast_icon = ""
         return ctk.CTkImage(light_image=out, dark_image=out, size=(size, size))
 
     def show_page(self, key):
@@ -665,7 +754,7 @@ class App:
         self._entry(c, 2, "category_ids", placeholder="Kategori ID (birden fazlaysa virgulle ayir)")
         ctk.CTkFrame(c, height=12, fg_color="transparent").grid(row=3, column=0)
 
-        c = self._section(body, "♪", "Ses", "Ticket gelince bu bilgisayarda calar.")
+        c = self._section(body, "♪", "Bildirim", "Ticket gelince bu bilgisayarda ses calar ve bildirim cikar.")
         srow = ctk.CTkFrame(c, fg_color="transparent")
         srow.grid(row=2, column=0, columnspan=2, sticky="ew", padx=18, pady=(12, 4))
         srow.columnconfigure(1, weight=1)
@@ -687,13 +776,20 @@ class App:
         self._small_btn(frow, "Ses sec (.wav)", self.pick_sound, 120).pack(side="left")
         self._small_btn(frow, "Varsayilan", self.reset_sound, 96).pack(side="left", padx=(8, 0))
         self._small_btn(frow, "▶  Dene", self.test_sound, 80).pack(side="left", padx=(8, 0))
+        self._small_btn(frow, "■  Sustur", stop_sound, 90).pack(side="left", padx=(8, 0))
         self._sound_file_text()
 
         sw = ctk.CTkSwitch(c, text="Ticket gelince pencereyi one getir", variable=self.bring_front,
                            font=font(12), text_color=TEXT, progress_color=ACCENT,
                            button_color=TEXT, button_hover_color="white", fg_color=BORDER)
-        sw.grid(row=5, column=0, sticky="w", padx=18, pady=(12, 16))
+        sw.grid(row=5, column=0, sticky="w", padx=18, pady=(12, 4))
         self.inputs.append(sw)
+        sw2 = ctk.CTkSwitch(c, text="Sagdan Windows bildirimi goster (tiklayinca Discord'da ticket acilir)",
+                            variable=self.win_toast, font=font(12), text_color=TEXT,
+                            progress_color=ACCENT, button_color=TEXT, button_hover_color="white",
+                            fg_color=BORDER)
+        sw2.grid(row=6, column=0, sticky="w", padx=18, pady=(8, 16))
+        self.inputs.append(sw2)
         outer_item = self._window(tag, outer)
 
         save_btn = ctk.CTkButton(self.canvas, text="✓  KAYDET", width=140, height=42, corner_radius=0,
@@ -734,7 +830,7 @@ class App:
     def show_toast(self, guild, name, link):
         self.toast_name.configure(text=f"#{name}")
         self.toast_sub.configure(text=f"{guild}  •  {time.strftime('%H:%M:%S')}")
-        self.toast_btn.configure(command=lambda: (webbrowser.open(link), self.hide_toast()))
+        self.toast_btn.configure(command=lambda: (stop_sound(), open_link(*link), self.hide_toast()))
         self.canvas.itemconfigure(self.toast_item, state="normal")
         if self.toast_job:
             self.root.after_cancel(self.toast_job)
@@ -762,7 +858,10 @@ class App:
         self.sound_lbl.configure(text="Kapali" if n == 0 else f"{n} kez")
 
     def _sound_file_text(self):
-        name = os.path.basename(self.sound_file) if self.sound_file else "Windows uyari sesi"
+        if self.sound_file:
+            name = os.path.basename(self.sound_file)
+        else:
+            name = "Varsayilan (programin kendi sesi)" if sound_path() else "Windows uyari sesi"
         self.sound_file_lbl.configure(text=f"Ses:  {name}")
 
     def pick_sound(self):
@@ -794,6 +893,7 @@ class App:
             "sound_repeat": int(self.sound_repeat.get()),
             "sound_file": self.sound_file,
             "bring_front": bool(self.bring_front.get()),
+            "windows_toast": bool(self.win_toast.get()),
         }
 
     def save(self):
@@ -868,7 +968,9 @@ class App:
         self.stat_count.set(f"{self.count} ticket")
         self.log(f"Yeni ticket: #{name} ({guild})")
 
-        play_sound(self.cfg.get("sound_repeat", 3), self.cfg.get("sound_file", ""))
+        play_sound(self.cfg.get("sound_repeat", 1), self.cfg.get("sound_file", ""))
+        if self.cfg.get("windows_toast", True):
+            windows_toast("Yeni ticket acildi", f"#{name}  •  {guild}", link[0], self.toast_icon)
         flash_window(self.root)
         self.show_toast(guild, name, link)
         self.start_alarm()
@@ -918,6 +1020,7 @@ class App:
         self.root.after(100, self.poll_events)
 
     def on_close(self):
+        stop_sound()
         if self.runner:
             self.runner.stop()
         self.root.destroy()

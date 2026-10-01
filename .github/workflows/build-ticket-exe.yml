@@ -29,7 +29,22 @@ jobs:
         run: pip install pyinstaller discord.py customtkinter pillow
 
       - name: Build EXE
-        run: pyinstaller --onefile --windowed --collect-data customtkinter --add-data "assets/arka_plan.jpg;assets" --name ticket_bildirim ticket_bildirim.py
+        run: pyinstaller --onefile --windowed --collect-data customtkinter --add-data "assets/arka_plan.jpg;assets" --add-data "assets/bildirim.wav;assets" --name ticket_bildirim ticket_bildirim.py
+
+      - name: Toast smoke test
+        continue-on-error: true
+        shell: python
+        run: |
+          import importlib.util, subprocess, base64
+          spec = importlib.util.spec_from_file_location("t", "ticket_bildirim.py")
+          t = importlib.util.module_from_spec(spec); spec.loader.exec_module(t)
+          cap = {}
+          t.subprocess.Popen = lambda args, **k: cap.setdefault("a", args)
+          t.windows_toast("Yeni ticket acildi", "#ticket-0001 - test", "discord://-/channels/1/2")
+          r = subprocess.run(cap["a"], capture_output=True, text=True)
+          print("exit:", r.returncode); print("stdout:", r.stdout); print("stderr:", r.stderr)
+          assert r.returncode == 0 and not r.stderr.strip()
+          print("sound:", t.sound_path())
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
