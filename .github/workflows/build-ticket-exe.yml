@@ -28,7 +28,7 @@ jobs:
         run: pip install pyinstaller discord.py
 
       - name: Build EXE
-        run: pyinstaller --onefile --console --name ticket_bildirim ticket_bildirim.py
+        run: pyinstaller --onefile --windowed --name ticket_bildirim ticket_bildirim.py
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
