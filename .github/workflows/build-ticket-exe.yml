@@ -25,10 +25,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pyinstaller discord.py
+        run: pip install pyinstaller discord.py customtkinter
 
       - name: Build EXE
-        run: pyinstaller --onefile --windowed --name ticket_bildirim ticket_bildirim.py
+        run: pyinstaller --onefile --windowed --collect-data customtkinter --name ticket_bildirim ticket_bildirim.py
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
