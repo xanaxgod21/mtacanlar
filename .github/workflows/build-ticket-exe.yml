@@ -10,6 +10,7 @@ on:
       - claude/optimistic-einstein-8g17cw
     paths:
       - ticket_bildirim.py
+      - assets/**
       - .github/workflows/build-ticket-exe.yml
 
 jobs:
@@ -25,10 +26,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pyinstaller discord.py customtkinter
+        run: pip install pyinstaller discord.py customtkinter pillow
 
       - name: Build EXE
-        run: pyinstaller --onefile --windowed --collect-data customtkinter --name ticket_bildirim ticket_bildirim.py
+        run: pyinstaller --onefile --windowed --collect-data customtkinter --add-data "assets/arka_plan.jpg;assets" --name ticket_bildirim ticket_bildirim.py
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4

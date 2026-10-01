@@ -24,7 +24,7 @@ KURULUM:
   3) Ticket kanallari gizliyse bot da gorebilmeli: ticket kategorisinde bota
      (ya da botun rolune) "Kanali Gor" izni verilmeli. Goremedigi kanalin
      acildigindan haberi olmaz.
-  4) pip install -U discord.py customtkinter
+  4) pip install -U discord.py customtkinter pillow
   5) python ticket_bildirim.py -> ayarlari pencereden gir, Baslat'a bas.
      Ayarlar ticket_config.json dosyasina kaydedilir.
 """
@@ -43,6 +43,11 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 try:
+    from PIL import Image, ImageTk, ImageDraw, ImageEnhance
+except ImportError:
+    Image = None
+
+try:
     import discord
 except ImportError:
     discord = None
@@ -50,18 +55,22 @@ except ImportError:
 CONFIG_NAME = "ticket_config.json"
 SOUND_NAME  = "bildirim.wav"   # exe'nin yanina koyarsan bu ses calar
 
-# Renkler: koyu ama tam siyah degil, dusuk kontrastli yuzeyler -> goz yormaz
-BG       = "#111214"
-SIDEBAR  = "#0c0d0f"
-CARD     = "#1a1b1f"
-CARD_HI  = "#212228"
-BORDER   = "#2a2b31"
-TEXT     = "#e4e4e7"
-MUTED    = "#8b8d96"
-ACCENT   = "#e5484d"
-ACCENT_H = "#c93b40"
-GREEN    = "#3dd68c"
-YELLOW   = "#f5a524"
+# Renkler: arka plan resmine uygun kirmizi/siyah tema, yuzeyler koyu bordo
+BG        = "#0b0405"
+SIDEBAR   = "#0e0607"
+CARD      = "#170a0c"
+CARD_HI   = "#1f0e10"
+CARD_ROW  = "#1a0b0d"
+FIELD     = "#120708"
+BORDER    = "#33161a"
+BORDER_HI = "#5a1d24"
+TEXT      = "#f3e7e8"
+MUTED     = "#a88c8f"
+ACCENT    = "#e8283a"
+ACCENT_H  = "#c01d2e"
+GLOW      = "#ff5a68"
+GREEN     = "#4ade80"
+YELLOW    = "#fbbf24"
 
 
 # ----------------- yardimcilar -----------------
@@ -244,16 +253,74 @@ class BotRunner:
 # ----------------- arayuz -----------------
 
 FONT = "Segoe UI"
+BG_NAME = "arka_plan.jpg"   # exe'nin yanina ayni isimle koyarsan arka plan o olur
 
 
 def font(size=13, weight="normal"):
     return ctk.CTkFont(family=FONT, size=size, weight=weight)
 
 
+def resource(name):
+    # Once exe'nin yanina bak (kullanici degistirebilsin), yoksa exe'nin icindekini kullan
+    outside = os.path.join(app_dir(), name)
+    if os.path.exists(outside):
+        return outside
+    base = getattr(sys, "_MEIPASS", app_dir())
+    return os.path.join(base, "assets", name)
+
+
+def load_bg():
+    if Image is None:
+        return None
+    try:
+        return Image.open(resource(BG_NAME)).convert("RGB")
+    except Exception:
+        return None
+
+
+class Background:
+    """Canvas'a resmi 'cover' seklinde, yazilar okunsun diye karartilmis olarak ciziz."""
+
+    def __init__(self, canvas, image):
+        self.canvas = canvas
+        self.src = image
+        self.photo = None
+        self.size = None
+        self.item = canvas.create_image(0, 0, anchor="nw")
+        canvas.tag_lower(self.item)
+
+    def render(self, w, h, focus_x):
+        """focus_x: resmin ortasinin (karakterin) gelecegi x noktasi."""
+        key = (w, h, int(focus_x))
+        if self.src is None or w < 10 or h < 10 or self.size == key:
+            return
+        self.size = key
+        iw, ih = self.src.size
+        # Yuksekligi tam doldur, karakter sag taraftaki bos alanda dursun
+        scale = max(h / ih, (w - focus_x) * 2 / iw)
+        img = self.src.resize((int(iw * scale) + 1, int(ih * scale) + 1), Image.LANCZOS)
+        img = ImageEnhance.Brightness(img).enhance(0.8)
+        canvas = Image.new("RGB", (w, h), (11, 4, 5))
+        canvas.paste(img, (int(focus_x - img.width / 2), int((h - img.height) / 2)))
+
+        # Soldan saga karartma: kartlarin oldugu taraf koyu, karakter tarafi parlak
+        ramp = Image.new("L", (w, 1))
+        img_left = focus_x - img.width / 2
+        fade = max(1.0, img.width * 0.3)
+        for x in range(w):
+            t = min(1.0, max(0.0, (x - img_left) / fade))
+            t = t * t * (3 - 2 * t)  # yumusak gecis
+            ramp.putpixel((x, 0), int(255 * (1 - t) + 30 * t))
+        mask = ramp.resize((w, h))
+        img = Image.composite(Image.new("RGB", (w, h), (11, 4, 5)), canvas, mask)
+        self.photo = ImageTk.PhotoImage(img)
+        self.canvas.itemconfigure(self.item, image=self.photo)
+
+
 class Card(ctk.CTkFrame):
     def __init__(self, master, **kw):
         kw.setdefault("fg_color", CARD)
-        kw.setdefault("corner_radius", 14)
+        kw.setdefault("corner_radius", 12)
         kw.setdefault("border_width", 1)
         kw.setdefault("border_color", BORDER)
         super().__init__(master, **kw)
@@ -261,11 +328,11 @@ class Card(ctk.CTkFrame):
 
 class StatCard(Card):
     def __init__(self, master, title, value, color=TEXT):
-        super().__init__(master)
-        ctk.CTkLabel(self, text=title, font=font(12), text_color=MUTED).pack(
+        super().__init__(master, corner_radius=0, border_color=BORDER_HI)
+        ctk.CTkLabel(self, text=title.upper(), font=font(11, "bold"), text_color=MUTED).pack(
             anchor="w", padx=18, pady=(14, 0))
-        self.value = ctk.CTkLabel(self, text=value, font=font(20, "bold"), text_color=color)
-        self.value.pack(anchor="w", padx=18, pady=(2, 14))
+        self.value = ctk.CTkLabel(self, text=value, font=font(17, "bold"), text_color=color)
+        self.value.pack(anchor="w", padx=18, pady=(0, 14))
 
     def set(self, value, color=None):
         self.value.configure(text=value)
@@ -291,10 +358,12 @@ class TicketRow(ctk.CTkFrame):
             row=0, column=2, rowspan=2, padx=12)
 
         # Yeni gelen satir bir sure vurgulu kalir, sonra sakinlesir
-        self.after(6000, lambda: self.configure(border_color=BORDER, fg_color=CARD))
+        self.after(6000, lambda: self.configure(border_color=BORDER, fg_color=CARD_ROW))
 
 
 class App:
+    PAD = 28
+
     def __init__(self, root):
         self.root = root
         self.events = queue.Queue()
@@ -302,10 +371,11 @@ class App:
         self.cfg = {}
         self.count = 0
         self.rows = []
+        self.page = None
 
         root.title("Ticket Bildirim")
-        root.geometry("980x660")
-        root.minsize(860, 580)
+        root.geometry("1180x720")
+        root.minsize(980, 620)
         root.configure(fg_color=BG)
 
         cfg = load_config()
@@ -318,11 +388,19 @@ class App:
             "ping_user_id": tk.StringVar(value=cfg.get("ping_user_id", "")),
         }
         self.sound_repeat = tk.IntVar(value=int(cfg.get("sound_repeat", 3) or 0))
+        self.bg_image = load_bg()
 
         root.columnconfigure(1, weight=1)
         root.rowconfigure(0, weight=1)
         self._build_sidebar()
+
+        # Icerik alani bir canvas: arka plan resmi burada, kartlar ustune yerlestiriliyor
+        self.canvas = tk.Canvas(root, bg=BG, highlightthickness=0, bd=0)
+        self.canvas.grid(row=0, column=1, sticky="nsew")
+        self.bg = Background(self.canvas, self.bg_image)
+
         self.pages = {"panel": self._build_panel(), "ayarlar": self._build_settings()}
+        self.canvas.bind("<Configure>", lambda e: self.relayout())
         self.show_page("ayarlar" if not cfg.get("token") else "panel")
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -333,23 +411,60 @@ class App:
             self.log("discord.py kurulu degil: pip install -U discord.py")
             self.start_btn.configure(state="disabled")
 
+    # --- canvas yardimcilari ---
+    def _text(self, tag, text, size, weight="normal", color=TEXT):
+        # Golgeli yazi: resmin uzerinde de net okunsun
+        f = (FONT, size, weight)
+        sh = self.canvas.create_text(0, 0, text=text, font=f, fill="#000000", anchor="nw",
+                                     tags=(tag, f"{tag}-shadow"))
+        tx = self.canvas.create_text(0, 0, text=text, font=f, fill=color, anchor="nw", tags=(tag,))
+        return sh, tx
+
+    def _move_text(self, pair, x, y):
+        self.canvas.coords(pair[0], x + 1, y + 2)
+        self.canvas.coords(pair[1], x, y)
+
+    def _set_text(self, pair, text, color=None):
+        for i in pair:
+            self.canvas.itemconfigure(i, text=text)
+        if color:
+            self.canvas.itemconfigure(pair[1], fill=color)
+
+    def _window(self, tag, widget):
+        return self.canvas.create_window(0, 0, window=widget, anchor="nw", tags=(tag,))
+
+    def _place(self, item, x, y, w, h):
+        self.canvas.coords(item, x, y)
+        self.canvas.itemconfigure(item, width=max(1, int(w)), height=max(1, int(h)))
+
     # --- yan menu ---
     def _build_sidebar(self):
-        side = ctk.CTkFrame(self.root, width=220, corner_radius=0, fg_color=SIDEBAR)
+        side = ctk.CTkFrame(self.root, width=230, corner_radius=0, fg_color=SIDEBAR,
+                            border_width=0)
         side.grid(row=0, column=0, sticky="nsw")
         side.grid_propagate(False)
+        ctk.CTkFrame(self.root, width=1, corner_radius=0, fg_color=BORDER_HI).grid(
+            row=0, column=0, sticky="nse")
 
         brand = ctk.CTkFrame(side, fg_color="transparent")
-        brand.pack(fill="x", padx=20, pady=(26, 30))
-        ctk.CTkLabel(brand, text="●", font=font(18), text_color=ACCENT).pack(side="left")
-        ctk.CTkLabel(brand, text="  Ticket Bildirim", font=font(16, "bold"),
-                     text_color=TEXT).pack(side="left")
+        brand.pack(fill="x", padx=18, pady=(24, 28))
+        avatar = self._avatar(44)
+        if avatar:
+            ctk.CTkLabel(brand, text="", image=avatar).pack(side="left")
+        else:
+            ctk.CTkLabel(brand, text="●", font=font(18), text_color=ACCENT).pack(side="left")
+        titles = ctk.CTkFrame(brand, fg_color="transparent")
+        titles.pack(side="left", padx=(12, 0))
+        ctk.CTkLabel(titles, text="Ticket Bildirim", font=font(15, "bold"),
+                     text_color=TEXT, height=20).pack(anchor="w")
+        ctk.CTkLabel(titles, text="yeni ticket alarmi", font=font(11),
+                     text_color=MUTED, height=16).pack(anchor="w")
 
         self.nav = {}
         for key, label in (("panel", "Panel"), ("ayarlar", "Ayarlar")):
-            b = ctk.CTkButton(side, text=label, anchor="w", height=40, corner_radius=10,
+            b = ctk.CTkButton(side, text=f"   {label}", anchor="w", height=42, corner_radius=10,
                               font=font(13, "bold"), fg_color="transparent",
-                              hover_color=CARD, text_color=MUTED,
+                              hover_color=CARD_HI, text_color=MUTED, border_width=0,
                               command=lambda k=key: self.show_page(k))
             b.pack(fill="x", padx=14, pady=3)
             self.nav[key] = b
@@ -357,7 +472,8 @@ class App:
         bottom = ctk.CTkFrame(side, fg_color="transparent")
         bottom.pack(side="bottom", fill="x", padx=14, pady=20)
 
-        pill = ctk.CTkFrame(bottom, fg_color=CARD, corner_radius=10)
+        pill = ctk.CTkFrame(bottom, fg_color=CARD, corner_radius=10, border_width=1,
+                            border_color=BORDER)
         pill.pack(fill="x", pady=(0, 12))
         self.status_dot = ctk.CTkLabel(pill, text="●", font=font(14), text_color=MUTED)
         self.status_dot.pack(side="left", padx=(14, 6), pady=10)
@@ -365,62 +481,94 @@ class App:
                                        text_color=TEXT)
         self.status_lbl.pack(side="left")
 
-        self.start_btn = ctk.CTkButton(bottom, text="Baslat", height=44, corner_radius=10,
+        self.start_btn = ctk.CTkButton(bottom, text="BASLAT", height=46, corner_radius=10,
                                        font=font(14, "bold"), fg_color=ACCENT,
-                                       hover_color=ACCENT_H, command=self.toggle_run)
+                                       hover_color=ACCENT_H, border_width=1,
+                                       border_color=GLOW, command=self.toggle_run)
         self.start_btn.pack(fill="x")
 
+    def _avatar(self, size):
+        if self.bg_image is None:
+            return None
+        src = self.bg_image
+        s = min(src.size)
+        # Resmin ortasindaki kismi yuvarlak kirp
+        img = src.crop(((src.width - s) // 2, int(s * 0.12), (src.width + s) // 2, int(s * 0.12) + s))
+        img = img.resize((size * 3, size * 3), Image.LANCZOS)
+        mask = Image.new("L", img.size, 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, img.width - 1, img.height - 1), fill=255)
+        out = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        out.paste(img, (0, 0), mask)
+        return ctk.CTkImage(light_image=out, dark_image=out, size=(size, size))
+
     def show_page(self, key):
-        for k, page in self.pages.items():
-            page.grid_forget()
-            self.nav[k].configure(fg_color="transparent", text_color=MUTED)
-        self.pages[key].grid(row=0, column=1, sticky="nsew", padx=28, pady=24)
-        self.nav[key].configure(fg_color=CARD, text_color=TEXT)
+        self.page = key
+        for k in self.pages:
+            state = "normal" if k == key else "hidden"
+            self.canvas.itemconfigure(k, state=state)
+            self.nav[k].configure(fg_color=CARD_HI if k == key else "transparent",
+                                  text_color=TEXT if k == key else MUTED,
+                                  border_width=1 if k == key else 0,
+                                  border_color=BORDER_HI)
+        self.relayout()
+
+    def relayout(self):
+        w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
+        if w < 10:
+            return
+        split = self.split(w)
+        self.bg.render(w, h, split + (w - split) / 2)
+        self.pages[self.page](w, h)
+
+    def split(self, w):
+        # Kartlar solda bu genislige kadar, saginda arka plan resmi gorunur
+        return self.PAD + (w - 2 * self.PAD) * 0.62
 
     # --- panel sayfasi ---
     def _build_panel(self):
-        page = ctk.CTkFrame(self.root, fg_color="transparent")
-        page.columnconfigure((0, 1, 2), weight=1, uniform="stat")
-        page.rowconfigure(3, weight=1)
+        tag = "panel"
+        title = self._text(tag, "Panel", 24, "bold")
+        sub = self._text(tag, "Yeni ticket acildiginda ses calar ve burada listelenir.", 12, color=MUTED)
 
-        ctk.CTkLabel(page, text="Panel", font=font(24, "bold"), text_color=TEXT).grid(
-            row=0, column=0, columnspan=3, sticky="w")
-        ctk.CTkLabel(page, text="Yeni ticket acildiginda ses calar ve burada listelenir.",
-                     font=font(13), text_color=MUTED).grid(
-            row=1, column=0, columnspan=3, sticky="w", pady=(2, 18))
+        self.stat_status = StatCard(self.canvas, "Durum", "Durduruldu", MUTED)
+        self.stat_count = StatCard(self.canvas, "Bu oturumda", "0 ticket")
+        self.stat_last = StatCard(self.canvas, "Son ticket", "-")
+        stats = [self._window(tag, s) for s in (self.stat_status, self.stat_count, self.stat_last)]
 
-        self.stat_status = StatCard(page, "Durum", "Durduruldu", MUTED)
-        self.stat_status.grid(row=2, column=0, sticky="ew", padx=(0, 8))
-        self.stat_count = StatCard(page, "Bu oturumda", "0 ticket")
-        self.stat_count.grid(row=2, column=1, sticky="ew", padx=8)
-        self.stat_last = StatCard(page, "Son ticket", "-")
-        self.stat_last.grid(row=2, column=2, sticky="ew", padx=(8, 0))
-
-        box = Card(page)
-        box.grid(row=3, column=0, columnspan=3, sticky="nsew", pady=(16, 0))
+        box = Card(self.canvas, corner_radius=0, border_color=BORDER_HI)
         box.columnconfigure(0, weight=1)
         box.rowconfigure(1, weight=1)
-
         head = ctk.CTkFrame(box, fg_color="transparent")
         head.grid(row=0, column=0, sticky="ew", padx=18, pady=(14, 6))
-        ctk.CTkLabel(head, text="Gelen ticket'lar", font=font(15, "bold"),
+        ctk.CTkLabel(head, text="GELEN TICKET'LAR", font=font(12, "bold"),
                      text_color=TEXT).pack(side="left")
         ctk.CTkButton(head, text="Temizle", width=80, height=28, corner_radius=8,
                       font=font(12), fg_color=CARD_HI, hover_color=BORDER,
                       text_color=MUTED, command=self.clear).pack(side="right")
-
         self.list = ctk.CTkScrollableFrame(box, fg_color="transparent",
-                                           scrollbar_button_color=BORDER,
-                                           scrollbar_button_hover_color=MUTED)
+                                           scrollbar_button_color=BORDER_HI,
+                                           scrollbar_button_hover_color=ACCENT)
         self.list.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
         self.list.columnconfigure(0, weight=1)
         self.empty = ctk.CTkLabel(self.list, text="Henuz ticket yok.\nBaslat'a bas, yeni ticket gelince burada gorunur.",
                                   font=font(13), text_color=MUTED, justify="center")
         self.empty.grid(row=0, column=0, pady=60)
+        box_item = self._window(tag, box)
 
-        self.log_lbl = ctk.CTkLabel(page, text="", font=font(12), text_color=MUTED, anchor="w")
-        self.log_lbl.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
-        return page
+        self.log_text = self._text(tag, "", 11, color=MUTED)
+
+        def layout(w, h):
+            p = self.PAD
+            self._move_text(title, p, 22)
+            self._move_text(sub, p, 62)
+            right = self.split(w)
+            gap = 12
+            sw = (right - p - 2 * gap) / 3
+            for i, item in enumerate(stats):
+                self._place(item, p + i * (sw + gap), 98, sw, 84)
+            self._place(box_item, p, 194, right - p, h - 194 - 44)
+            self._move_text(self.log_text, p, h - 30)
+        return layout
 
     # --- ayarlar sayfasi ---
     def _field(self, parent, row, label, key, hint="", secret=False):
@@ -430,40 +578,41 @@ class App:
             ctk.CTkLabel(parent, text=hint, font=font(12), text_color=MUTED,
                          anchor="e").grid(row=row, column=1, sticky="e", padx=18, pady=(10, 0))
         e = ctk.CTkEntry(parent, textvariable=self.vars[key], height=38, corner_radius=8,
-                         fg_color=BG, border_color=BORDER, border_width=1,
+                         fg_color=FIELD, border_color=BORDER, border_width=1,
                          text_color=TEXT, font=font(13), show="•" if secret else "")
         e.grid(row=row + 1, column=0, columnspan=2, sticky="ew", padx=18, pady=(6, 4))
         self.inputs.append(e)
         return e
 
     def _section(self, parent, title, subtitle):
-        card = Card(parent)
-        card.pack(fill="x", pady=(0, 14))
+        card = Card(parent, fg_color=CARD_HI)
+        card.pack(fill="x", pady=(0, 12), padx=(0, 6))
         card.columnconfigure(0, weight=1)
-        ctk.CTkLabel(card, text=title, font=font(15, "bold"), text_color=TEXT,
+        ctk.CTkLabel(card, text=title.upper(), font=font(12, "bold"), text_color=ACCENT,
                      anchor="w").grid(row=0, column=0, sticky="w", padx=18, pady=(16, 0))
         ctk.CTkLabel(card, text=subtitle, font=font(12), text_color=MUTED,
                      anchor="w").grid(row=1, column=0, columnspan=2, sticky="w", padx=18)
         return card
 
     def _build_settings(self):
-        page = ctk.CTkFrame(self.root, fg_color="transparent")
-        page.columnconfigure(0, weight=1)
-        page.rowconfigure(1, weight=1)
-        ctk.CTkLabel(page, text="Ayarlar", font=font(24, "bold"), text_color=TEXT).grid(
-            row=0, column=0, sticky="w", pady=(0, 14))
+        tag = "ayarlar"
+        title = self._text(tag, "Ayarlar", 24, "bold")
+        sub = self._text(tag, "Baslat'a bastiginda ayarlar otomatik kaydedilir.", 12, color=MUTED)
 
-        body = ctk.CTkScrollableFrame(page, fg_color="transparent",
-                                      scrollbar_button_color=BORDER,
-                                      scrollbar_button_hover_color=MUTED)
-        body.grid(row=1, column=0, sticky="nsew")
+        outer = Card(self.canvas, corner_radius=0, border_color=BORDER_HI)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=1)
+        body = ctk.CTkScrollableFrame(outer, fg_color="transparent",
+                                      scrollbar_button_color=BORDER_HI,
+                                      scrollbar_button_hover_color=ACCENT)
+        body.grid(row=0, column=0, sticky="nsew", padx=12, pady=12)
         self.inputs = []
 
         c = self._section(body, "Baglanti", "Developer Portal'dan aldigin BOT token'i.")
         self.token_entry = self._field(c, 2, "Bot token", "token", secret=True)
         self.show_token = ctk.CTkCheckBox(c, text="Token'i goster", font=font(12),
                                           text_color=MUTED, fg_color=ACCENT,
-                                          hover_color=ACCENT_H, border_color=BORDER,
+                                          hover_color=ACCENT_H, border_color=BORDER_HI,
                                           checkbox_width=18, checkbox_height=18,
                                           command=self.toggle_token)
         self.show_token.grid(row=4, column=0, sticky="w", padx=18, pady=(4, 16))
@@ -483,28 +632,37 @@ class App:
                                       text_color=TEXT)
         slider = ctk.CTkSlider(srow, from_=0, to=10, number_of_steps=10,
                                variable=self.sound_repeat, progress_color=ACCENT,
-                               button_color=ACCENT, button_hover_color=ACCENT_H,
+                               button_color=ACCENT, button_hover_color=GLOW,
                                fg_color=BORDER, command=lambda _v: self._sound_text())
         slider.grid(row=0, column=0, sticky="ew")
         self.inputs.append(slider)
         self.sound_lbl.grid(row=0, column=1, padx=(12, 8))
         ctk.CTkButton(srow, text="Sesi dene", width=96, height=32, corner_radius=8,
-                      font=font(12, "bold"), fg_color=CARD_HI, hover_color=BORDER,
+                      font=font(12, "bold"), fg_color=CARD, hover_color=BORDER,
+                      border_width=1, border_color=BORDER_HI,
                       text_color=TEXT, command=self.test_sound).grid(row=0, column=2)
         self._sound_text()
         self._field(c, 4, "Webhook adresi", "webhook_url", "istege bagli")
         self._field(c, 6, "DM atilacak kullanici ID'leri", "dm_user_ids", "virgulle ayir")
         self._field(c, 8, "Webhook'ta etiketlenecek kullanici ID'si", "ping_user_id", "istege bagli")
         ctk.CTkFrame(c, height=12, fg_color="transparent").grid(row=10, column=0)
+        outer_item = self._window(tag, outer)
 
-        save = ctk.CTkFrame(page, fg_color="transparent")
-        save.grid(row=2, column=0, sticky="ew", pady=(12, 0))
-        self.save_lbl = ctk.CTkLabel(save, text="", font=font(12), text_color=GREEN)
-        self.save_lbl.pack(side="left")
-        ctk.CTkButton(save, text="Kaydet", width=120, height=38, corner_radius=10,
-                      font=font(13, "bold"), fg_color=ACCENT, hover_color=ACCENT_H,
-                      command=self.save).pack(side="right")
-        return page
+        save_btn = ctk.CTkButton(self.canvas, text="KAYDET", width=130, height=40, corner_radius=0,
+                                 font=font(13, "bold"), fg_color=ACCENT, hover_color=ACCENT_H,
+                                 border_width=1, border_color=GLOW, command=self.save)
+        save_item = self._window(tag, save_btn)
+        self.save_text = self._text(tag, "", 12, "bold", color=GREEN)
+
+        def layout(w, h):
+            p = self.PAD
+            self._move_text(title, p, 22)
+            self._move_text(sub, p, 62)
+            right = self.split(w)
+            self._place(outer_item, p, 98, right - p, h - 98 - 76)
+            self._place(save_item, right - 130, h - 60, 130, 40)
+            self._move_text(self.save_text, p, h - 50)
+        return layout
 
     # --- islemler ---
     def _sound_text(self):
@@ -520,7 +678,7 @@ class App:
         self.stat_status.set(text, color)
 
     def log(self, text):
-        self.log_lbl.configure(text=f"{time.strftime('%H:%M:%S')}   {text}")
+        self._set_text(self.log_text, f"{time.strftime('%H:%M:%S')}   {text}")
 
     def collect_config(self):
         v = self.vars
@@ -537,10 +695,10 @@ class App:
     def save(self):
         try:
             save_config(self.collect_config())
-            self.save_lbl.configure(text="Kaydedildi", text_color=GREEN)
+            self._set_text(self.save_text, "Kaydedildi", GREEN)
         except Exception as e:
-            self.save_lbl.configure(text=f"Kaydedilemedi: {e}", text_color=ACCENT)
-        self.root.after(2500, lambda: self.save_lbl.configure(text=""))
+            self._set_text(self.save_text, f"Kaydedilemedi: {e}", ACCENT)
+        self.root.after(2500, lambda: self._set_text(self.save_text, ""))
 
     def set_inputs(self, enabled):
         for e in self.inputs:
@@ -569,7 +727,8 @@ class App:
         self.runner = BotRunner(cfg, self.events)
         self.runner.start()
         self.set_inputs(False)
-        self.start_btn.configure(text="Durdur", fg_color=CARD_HI, hover_color=BORDER)
+        self.start_btn.configure(text="DURDUR", fg_color=CARD_HI, hover_color=BORDER,
+                                 border_color=BORDER_HI)
         self.set_status("Baglaniyor", YELLOW)
         self.log("Discord'a baglaniliyor...")
         self.show_page("panel")
@@ -624,8 +783,8 @@ class App:
                 elif kind == "stopped":
                     self.runner = None
                     self.set_inputs(True)
-                    self.start_btn.configure(text="Baslat", state="normal",
-                                             fg_color=ACCENT, hover_color=ACCENT_H)
+                    self.start_btn.configure(text="BASLAT", state="normal", fg_color=ACCENT,
+                                             hover_color=ACCENT_H, border_color=GLOW)
                     self.set_status("Durduruldu", MUTED)
         except queue.Empty:
             pass
