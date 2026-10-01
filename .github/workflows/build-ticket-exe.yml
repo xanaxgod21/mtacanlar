@@ -35,18 +35,19 @@ jobs:
         continue-on-error: true
         shell: python
         run: |
-          import importlib.util, subprocess, base64
+          import importlib.util, threading, winreg
           spec = importlib.util.spec_from_file_location("t", "ticket_bildirim.py")
           t = importlib.util.module_from_spec(spec); spec.loader.exec_module(t)
-          cap = {}
-          real_popen = subprocess.Popen
-          subprocess.Popen = lambda args, **k: cap.setdefault("a", args)
-          t.windows_toast("Yeni ticket acildi", "#ticket-0001 - test", "discord://-/channels/1/2")
-          subprocess.Popen = real_popen
-          r = subprocess.run(cap["a"], capture_output=True, text=True)
-          print("exit:", r.returncode); print("stdout:", r.stdout); print("stderr:", r.stderr)
-          assert r.returncode == 0 and not r.stderr.strip()
+          errs = []
+          t.windows_toast("Yeni ticket acildi", "#ticket-0001 - test", "discord://-/channels/1/2", report=errs.append)
+          for th in threading.enumerate():
+              if th is not threading.current_thread():
+                  th.join(60)
+          key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Software\\Classes\\AppUserModelId\\" + t.TOAST_APP_ID)
+          print("registered:", winreg.QueryValueEx(key, "DisplayName")[0])
+          print("errors:", errs)
           print("sound:", t.sound_path())
+          assert not errs
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4

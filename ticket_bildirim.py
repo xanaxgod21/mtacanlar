@@ -186,12 +186,33 @@ def open_link(app_link, web_link):
     webbrowser.open(web_link)
 
 
-# Windows'un hazir PowerShell kimligi: ayrica kayit gerektirmeden bildirim gosterebilir
-TOAST_APP_ID = r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
+# Bildirimler bu kimlikle gosterilir; ilk kullanimda Windows'a (sadece bu kullanici icin) kaydedilir
+TOAST_APP_ID = "MDTicket.TicketAlarm"
+# Kayit ise yaramazsa Windows'un hazir PowerShell kimligi denenir
+PS_APP_ID = r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
 
 
-def windows_toast(title, body, app_link, icon=""):
-    """Sag alttan Windows bildirimi; tiklayinca app_link (discord://) acilir."""
+def register_toast_app(icon=""):
+    """Bildirimin sahibi olarak 'Ticket Alarm'i Windows'a tanitir (yonetici izni gerekmez)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                               rf"Software\Classes\AppUserModelId\{TOAST_APP_ID}")
+        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, APP_NAME)
+        winreg.SetValueEx(key, "ShowInSettings", 0, winreg.REG_DWORD, 1)
+        if icon:
+            winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, icon)
+        winreg.CloseKey(key)
+        return True
+    except Exception:
+        return False
+
+
+def windows_toast(title, body, app_link, icon="", report=None):
+    """Sag alttan Windows bildirimi; tiklayinca app_link (discord://) acilir.
+    Hata olursa report(mesaj) cagrilir."""
     if sys.platform != "win32":
         return
     link = escape(app_link, {'"': "&quot;"})
@@ -209,23 +230,41 @@ def windows_toast(title, body, app_link, icon=""):
         f'</toast>'
     )
     ps = (
+        "$ErrorActionPreference = 'Stop'\n"
         "$ProgressPreference = 'SilentlyContinue'\n"
         "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null\n"
         "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null\n"
         "$x = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
         "$x.LoadXml(@'\n" + xml + "\n'@)\n"
         "$t = [Windows.UI.Notifications.ToastNotification]::new($x)\n"
-        f"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{TOAST_APP_ID}').Show($t)\n"
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('__APPID__').Show($t)\n"
     )
-    encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
-    try:
-        subprocess.Popen(
+
+    def run_ps(app_id):
+        script = ps.replace("__APPID__", app_id)
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        r = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
              "-WindowStyle", "Hidden", "-EncodedCommand", encoded],
+            capture_output=True, text=True, timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-    except Exception:
-        pass
+        err = (r.stderr or "").strip()
+        return r.returncode == 0 and "Exception" not in err, err
+
+    def run():
+        # Arayuz donmasin diye ayri thread'de; once kendi kimligimizle, olmazsa PowerShell kimligiyle
+        try:
+            ok, err = run_ps(TOAST_APP_ID) if register_toast_app(icon) else (False, "")
+            if not ok:
+                ok, err = run_ps(PS_APP_ID)
+            if not ok and report:
+                report("Windows bildirimi gosterilemedi: " + (err.splitlines()[0] if err else "bilinmeyen hata"))
+        except Exception as e:
+            if report:
+                report(f"Windows bildirimi gosterilemedi: {e}")
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def flash_window(root):
@@ -275,6 +314,26 @@ class BotRunner:
     def _emit(self, kind, *data):
         self.events.put((kind, *data))
 
+    def _check(self):
+        """Kurulum hatalarini bulur: bot sunucuda mi, kategori dogru mu, kanallari gorebilir mi."""
+        client, problems = self.client, []
+        if not client.guilds:
+            return ["Bot hicbir sunucuda degil. Once botu sunucuna ekle "
+                    "(Developer Portal > OAuth2 > URL Generator > bot)."]
+        for cid in self.cfg.get("category_ids") or []:
+            ch = client.get_channel(cid)
+            if ch is None:
+                problems.append(f"{cid} ID'li kategori bulunamadi. ID yanlis olabilir ya da bot "
+                                "o kategoriyi goremiyor.")
+            elif not isinstance(ch, discord.CategoryChannel):
+                problems.append(f"{cid} bir kategori degil (#{ch.name} kanali). Kanala degil, "
+                                "kategorinin basligina sag tik > ID'yi Kopyala.")
+            elif not ch.permissions_for(ch.guild.me).administrator:
+                problems.append(f"Bot '{ch.guild.name}' sunucusunda yonetici degil. Ticket botlari "
+                                "kanallari gizli acar; bot goremedigi kanalin acildigini fark etmez. "
+                                "Bota Yonetici yetkisi olan bir rol ver.")
+        return problems
+
     def _run(self):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
@@ -286,6 +345,7 @@ class BotRunner:
         @client.event
         async def on_ready():
             self._emit("ready", str(client.user), len(client.guilds))
+            self._emit("check", self._check())
 
         @client.event
         async def on_guild_channel_create(channel):
@@ -293,6 +353,9 @@ class BotRunner:
                 path = f"channels/{channel.guild.id}/{channel.id}"
                 link = (f"discord://-/{path}", f"https://discord.com/{path}")
                 self._emit("ticket", channel.guild.name, channel.name, link)
+            else:
+                self._emit("log", f"Kanal acildi ama izlenen kategoride degil: #{channel.name} "
+                                  f"(kategori ID: {channel.category_id})")
 
         try:
             self.loop.run_until_complete(client.start(cfg["token"]))
@@ -666,6 +729,9 @@ class App:
         ctk.CTkButton(head, text="Temizle", width=80, height=28, corner_radius=8,
                       font=font(12), fg_color=CARD_HI, hover_color=BORDER, border_width=1,
                       border_color=BORDER, text_color=MUTED, command=self.clear).pack(side="right")
+        ctk.CTkButton(head, text="Test bildirimi", width=110, height=28, corner_radius=8,
+                      font=font(12, "bold"), fg_color=ACCENT, hover_color=ACCENT_H,
+                      command=self.test_ticket).pack(side="right", padx=(0, 8))
         self.list = ctk.CTkScrollableFrame(box, fg_color="transparent",
                                            scrollbar_button_color=BORDER_HI,
                                            scrollbar_button_hover_color=ACCENT)
@@ -958,7 +1024,13 @@ class App:
         self.stat_count.set("0 ticket")
         self.empty.grid(row=0, column=0, pady=70)
 
+    def test_ticket(self):
+        # Discord'a baglanmadan ses + Windows bildirimi + ekrandaki uyariyi dener
+        self.on_ticket("Test", "test-ticket",
+                       ("discord://-/channels/@me", "https://discord.com/channels/@me"))
+
     def on_ticket(self, guild, name, link):
+        cfg = self.cfg if self.runner else self.collect_config()
         when = time.strftime("%H:%M:%S")
         self.empty.grid_forget()
         row = TicketRow(self.list, guild, name, link, when)
@@ -969,15 +1041,16 @@ class App:
         self.stat_count.set(f"{self.count} ticket")
         self.log(f"Yeni ticket: #{name} ({guild})")
 
-        play_sound(self.cfg.get("sound_repeat", 1), self.cfg.get("sound_file", ""))
-        if self.cfg.get("windows_toast", True):
-            windows_toast("Yeni ticket acildi", f"#{name}  •  {guild}", link[0], self.toast_icon)
+        play_sound(cfg.get("sound_repeat", 1), cfg.get("sound_file", ""))
+        if cfg.get("windows_toast", True):
+            windows_toast("Yeni ticket acildi", f"#{name}  •  {guild}", link[0], self.toast_icon,
+                          report=lambda msg: self.events.put(("toast_error", msg)))
         flash_window(self.root)
         self.show_toast(guild, name, link)
         self.start_alarm()
         if self.page != "panel":
             self.show_page("panel")
-        if self.cfg.get("bring_front", True):
+        if cfg.get("bring_front", True):
             self.root.deiconify()
             self.root.lift()
             self.root.attributes("-topmost", True)
@@ -1005,6 +1078,21 @@ class App:
                     self.log(f"Giris yapildi: {user}  •  {guilds} sunucu izleniyor")
                 elif kind == "ticket":
                     self.on_ticket(*data)
+                elif kind == "log":
+                    self.log(data[0])
+                elif kind == "check":
+                    problems = data[0]
+                    if problems:
+                        self.set_status("Uyari var", YELLOW)
+                        self.log(problems[0])
+                        messagebox.showwarning(APP_NAME, "Bot calisiyor ama su sorunlar var:\n\n- "
+                                               + "\n\n- ".join(problems))
+                    else:
+                        self.log("Kurulum dogru: kategori bulundu, bot kanallari gorebiliyor.")
+                elif kind == "toast_error":
+                    self.log(data[0])
+                    messagebox.showwarning(APP_NAME, data[0] + "\n\nWindows Ayarlar > Sistem > "
+                                           "Bildirimler'de bildirimlerin acik oldugundan emin ol.")
                 elif kind == "error":
                     self.log(data[0])
                     messagebox.showerror(APP_NAME, data[0])
