@@ -149,8 +149,16 @@ def is_ticket(channel, cfg, category_name=None):
     return name_matches(category_name, cfg.get("category_names") or [])
 
 
+TICKET_WORDS = ("ticket", "destek", "support", "talep")
+
+
+def looks_like_ticket(channel_name, category_name):
+    # Kanali kimin actigi ogrenilemezse yedek kontrol: adlarda ticket'a benzer kelime var mi
+    return name_matches(category_name, TICKET_WORDS) or name_matches(channel_name, TICKET_WORDS)
+
+
 def has_target(cfg):
-    return bool(cfg.get("category_ids") or cfg.get("category_names"))
+    return bool(cfg.get("auto_detect", True) or cfg.get("category_ids") or cfg.get("category_names"))
 
 
 _sound_stop = threading.Event()
@@ -439,12 +447,17 @@ class BotRunner:
             return ["Bot hicbir sunucuda degil. Once botu sunucuna ekle "
                     "(Developer Portal > OAuth2 > URL Generator > bot)."]
         names = self.cfg.get("category_names") or []
-        if names:
+        auto = self.cfg.get("auto_detect", True)
+        if auto:
+            self._emit("log", "Otomatik algilama acik: botun gordugu tum sunucularda, ticket botunun "
+                              "actigi her yeni kanal icin alarm calar.")
+        if names or auto:
             for guild in client.guilds:
                 if not guild.me.guild_permissions.administrator:
                     problems.append(f"Bot '{guild.name}' sunucusunda yonetici degil. Ticket botlari "
                                     "kanallari gizli acar; bot goremedigi kanalin acildigini fark etmez. "
                                     "Bota Yonetici yetkisi olan bir rol ver.")
+        if names and not auto:
             found = [c for g in client.guilds for c in g.categories if name_matches(c.name, names)]
             # Kategori su an yoksa sorun degil: ticket botu acinca otomatik izlenir
             self._emit("log", "Izlenen kategori: " + ", ".join(c.name for c in found) if found else
@@ -457,11 +470,25 @@ class BotRunner:
             elif not isinstance(ch, discord.CategoryChannel):
                 problems.append(f"{cid} bir kategori degil (#{ch.name} kanali). Kanala degil, "
                                 "kategorinin basligina sag tik > ID'yi Kopyala.")
-            elif not ch.permissions_for(ch.guild.me).administrator:
+            elif not (names or auto) and not ch.permissions_for(ch.guild.me).administrator:
                 problems.append(f"Bot '{ch.guild.name}' sunucusunda yonetici degil. Ticket botlari "
                                 "kanallari gizli acar; bot goremedigi kanalin acildigini fark etmez. "
                                 "Bota Yonetici yetkisi olan bir rol ver.")
         return problems
+
+    async def _creator(self, channel):
+        """Kanali kim acti? Denetim kaydindan bakar; izin yoksa None doner."""
+        for _ in range(4):
+            try:
+                async for entry in channel.guild.audit_logs(limit=15, action=discord.AuditLogAction.channel_create):
+                    if entry.target is not None and entry.target.id == channel.id:
+                        return entry.user
+            except discord.Forbidden:
+                return None
+            except Exception:
+                pass
+            await asyncio.sleep(0.6)  # kayit bazen kanaldan biraz sonra dusuyor
+        return None
 
     def _run(self):
         self.loop = asyncio.new_event_loop()
@@ -485,13 +512,22 @@ class BotRunner:
                     category_name = (await client.fetch_channel(channel.category_id)).name
                 except Exception:
                     pass
-            if is_ticket(channel, cfg, category_name):
+            ticket = is_ticket(channel, cfg, category_name)
+            if not ticket and cfg.get("auto_detect", True) and isinstance(channel, discord.TextChannel):
+                # Otomatik: kanali bir bot (ticket botu) actiysa ticket say
+                creator = await self._creator(channel)
+                if creator is not None:
+                    ticket = creator.bot and creator.id != client.user.id
+                else:
+                    if category_name is None and channel.category is not None:
+                        category_name = channel.category.name
+                    ticket = looks_like_ticket(channel.name, category_name)
+            if ticket:
                 path = f"channels/{channel.guild.id}/{channel.id}"
                 link = (f"discord://-/{path}", f"https://discord.com/{path}")
                 self._emit("ticket", channel.guild.name, channel.name, link)
             else:
-                self._emit("log", f"Kanal acildi ama izlenen kategoride degil: #{channel.name} "
-                                  f"(kategori ID: {channel.category_id})")
+                self._emit("log", f"Kanal acildi ama ticket degil: #{channel.name}")
 
         try:
             self.loop.run_until_complete(client.start(cfg["token"]))
@@ -684,6 +720,7 @@ class App:
             "category_ids": tk.StringVar(value=ids_to_text(cfg.get("category_ids"))),
             "category_names": tk.StringVar(value=", ".join(cfg.get("category_names") or [])),
         }
+        self.auto_detect = tk.BooleanVar(value=bool(cfg.get("auto_detect", True)))
         self.sound_repeat = tk.IntVar(value=int(cfg.get("sound_repeat", 1) or 0))
         self.sound_file = cfg.get("sound_file", "")
         self.bring_front = tk.BooleanVar(value=bool(cfg.get("bring_front", True)))
@@ -962,21 +999,28 @@ class App:
         self.show_token.grid(row=3, column=0, sticky="w", padx=18, pady=(4, 16))
 
         c = self._section(body, "▤", "Ticket kategorisi",
-                          "Bu kategoride acilan her yeni kanal icin alarm calar.\nAsagidakilerden birini doldurman yeterli.")
-        ctk.CTkLabel(c, text="Kategori adi  (onerilen)", font=font(13, "bold"), text_color=TEXT,
-                     anchor="w").grid(row=2, column=0, sticky="w", padx=18, pady=(12, 0))
-        ctk.CTkLabel(c, text="Ticket botu kategoriyi silip yeniden acsa da calisir. Adin icinde gecen\n"
-                             "bir kelime yeterli, buyuk/kucuk harf fark etmez (ornek: ticket).",
+                          "Hangi kanallar acilinca alarm calsin.")
+        sw = ctk.CTkSwitch(c, text="Otomatik algila  (onerilen)", variable=self.auto_detect,
+                           font=font(13, "bold"), text_color=TEXT, progress_color=ACCENT,
+                           button_color=TEXT, button_hover_color="white", fg_color=BORDER)
+        sw.grid(row=2, column=0, sticky="w", padx=18, pady=(12, 0))
+        self.inputs.append(sw)
+        ctk.CTkLabel(c, text="Botun gordugu tum sunucularda, ticket botunun actigi her yeni kanal icin\n"
+                             "alarm calar. Kategori adi/ID girmene gerek yok, kategori silinip yeniden\n"
+                             "acilsa da calisir. Bota Yonetici yetkisi verilmis olmali.",
                      font=font(11), text_color=MUTED, anchor="w", justify="left").grid(
-            row=3, column=0, sticky="w", padx=18)
-        self._entry(c, 4, "category_names", placeholder="Kategori adi (birden fazlaysa virgulle ayir)")
-        ctk.CTkLabel(c, text="Kategori ID", font=font(13, "bold"), text_color=TEXT,
-                     anchor="w").grid(row=5, column=0, sticky="w", padx=18, pady=(12, 0))
-        ctk.CTkLabel(c, text="Kategori hic silinmiyorsa kullan. Discord'da Gelistirici Modu acikken\n"
-                          "kategoriye sag tik > ID'yi Kopyala.",
-                     font=font(11), text_color=MUTED, anchor="w", justify="left").grid(row=6, column=0, sticky="w", padx=18)
-        self._entry(c, 7, "category_ids", placeholder="Kategori ID (birden fazlaysa virgulle ayir)")
-        ctk.CTkFrame(c, height=12, fg_color="transparent").grid(row=8, column=0)
+            row=3, column=0, sticky="w", padx=18, pady=(4, 0))
+        ctk.CTkLabel(c, text="Elle ekle  (istege bagli)", font=font(13, "bold"), text_color=TEXT,
+                     anchor="w").grid(row=4, column=0, sticky="w", padx=18, pady=(16, 0))
+        ctk.CTkLabel(c, text="Kategori adinda gecen kelime (ornek: genel destek) ya da kategori ID.\n"
+                             "Birden fazlaysa virgulle ayir. Otomatik algilamayla birlikte de calisir.",
+                     font=font(11), text_color=MUTED, anchor="w", justify="left").grid(
+            row=5, column=0, sticky="w", padx=18)
+        for row, key, label in ((6, "category_names", "Kategori adi"), (8, "category_ids", "Kategori ID")):
+            ctk.CTkLabel(c, text=label, font=font(12), text_color=MUTED, anchor="w").grid(
+                row=row, column=0, sticky="w", padx=18, pady=(10, 0))
+            self._entry(c, row + 1, key).grid_configure(pady=(4, 4))
+        ctk.CTkFrame(c, height=12, fg_color="transparent").grid(row=10, column=0)
 
         c = self._section(body, "♪", "Bildirim", "Ticket gelince bu bilgisayarda ses calar ve bildirim cikar.")
         srow = ctk.CTkFrame(c, fg_color="transparent")
@@ -1130,6 +1174,7 @@ class App:
             "token": self.vars["token"].get().strip(),
             "category_ids": parse_ids(self.vars["category_ids"].get()),
             "category_names": parse_names(self.vars["category_names"].get()),
+            "auto_detect": bool(self.auto_detect.get()),
             "sound_repeat": int(self.sound_repeat.get()),
             "sound_file": self.sound_file,
             "bring_front": bool(self.bring_front.get()),
