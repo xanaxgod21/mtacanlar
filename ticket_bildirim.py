@@ -126,9 +126,31 @@ def save_config(cfg):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
-def is_ticket(channel, cfg):
-    return (isinstance(channel, discord.TextChannel)
-            and channel.category_id in (cfg.get("category_ids") or []))
+def parse_names(text):
+    return [n.strip() for n in str(text).split(",") if n.strip()]
+
+
+def name_matches(category_name, names):
+    # Buyuk/kucuk harf fark etmez, kategori adinin icinde gecmesi yeterli
+    # ("ticket" yazinca "╭・📩 Ticketlar 2" de eslesir)
+    cat = (category_name or "").casefold()
+    return any(n.casefold() in cat for n in names)
+
+
+def is_ticket(channel, cfg, category_name=None):
+    """Kanal izlenen bir kategoride mi? ID ile ya da kategori adiyla bakar.
+    Ad ile bakmak, ticket botu kategoriyi silip yeniden acsa da calisir."""
+    if not isinstance(channel, discord.TextChannel) or channel.category_id is None:
+        return False
+    if channel.category_id in (cfg.get("category_ids") or []):
+        return True
+    if category_name is None and channel.category is not None:
+        category_name = channel.category.name
+    return name_matches(category_name, cfg.get("category_names") or [])
+
+
+def has_target(cfg):
+    return bool(cfg.get("category_ids") or cfg.get("category_names"))
 
 
 _sound_stop = threading.Event()
@@ -416,6 +438,17 @@ class BotRunner:
         if not client.guilds:
             return ["Bot hicbir sunucuda degil. Once botu sunucuna ekle "
                     "(Developer Portal > OAuth2 > URL Generator > bot)."]
+        names = self.cfg.get("category_names") or []
+        if names:
+            for guild in client.guilds:
+                if not guild.me.guild_permissions.administrator:
+                    problems.append(f"Bot '{guild.name}' sunucusunda yonetici degil. Ticket botlari "
+                                    "kanallari gizli acar; bot goremedigi kanalin acildigini fark etmez. "
+                                    "Bota Yonetici yetkisi olan bir rol ver.")
+            found = [c for g in client.guilds for c in g.categories if name_matches(c.name, names)]
+            # Kategori su an yoksa sorun degil: ticket botu acinca otomatik izlenir
+            self._emit("log", "Izlenen kategori: " + ", ".join(c.name for c in found) if found else
+                       "Su an bu adla kategori yok; ticket botu acinca otomatik izlenecek.")
         for cid in self.cfg.get("category_ids") or []:
             ch = client.get_channel(cid)
             if ch is None:
@@ -445,7 +478,14 @@ class BotRunner:
 
         @client.event
         async def on_guild_channel_create(channel):
-            if is_ticket(channel, cfg):
+            category_name = None
+            if channel.category is None and channel.category_id and cfg.get("category_names"):
+                # Kategori kanalla ayni anda acildiysa henuz hafizada olmayabilir; Discord'dan sor
+                try:
+                    category_name = (await client.fetch_channel(channel.category_id)).name
+                except Exception:
+                    pass
+            if is_ticket(channel, cfg, category_name):
                 path = f"channels/{channel.guild.id}/{channel.id}"
                 link = (f"discord://-/{path}", f"https://discord.com/{path}")
                 self._emit("ticket", channel.guild.name, channel.name, link)
@@ -642,6 +682,7 @@ class App:
         self.vars = {
             "token": tk.StringVar(value=cfg.get("token", "")),
             "category_ids": tk.StringVar(value=ids_to_text(cfg.get("category_ids"))),
+            "category_names": tk.StringVar(value=", ".join(cfg.get("category_names") or [])),
         }
         self.sound_repeat = tk.IntVar(value=int(cfg.get("sound_repeat", 1) or 0))
         self.sound_file = cfg.get("sound_file", "")
@@ -670,7 +711,7 @@ class App:
         self.pages = {"panel": self._build_panel(), "ayarlar": self._build_settings()}
         self._build_toast()
         self.canvas.bind("<Configure>", lambda e: self.relayout())
-        self.show_page("ayarlar" if not cfg.get("token") or not cfg.get("category_ids") else "panel")
+        self.show_page("ayarlar" if not cfg.get("token") or not has_target(cfg) else "panel")
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.after(100, self.poll_events)
@@ -921,11 +962,21 @@ class App:
         self.show_token.grid(row=3, column=0, sticky="w", padx=18, pady=(4, 16))
 
         c = self._section(body, "▤", "Ticket kategorisi",
-                          "Bu kategoride acilan her yeni kanal icin alarm calar.\n"
-                          "ID almak icin: Discord Ayarlar > Gelismis > Gelistirici Modu'nu ac,\n"
-                          "sonra kategoriye sag tik > ID'yi Kopyala.")
-        self._entry(c, 2, "category_ids", placeholder="Kategori ID (birden fazlaysa virgulle ayir)")
-        ctk.CTkFrame(c, height=12, fg_color="transparent").grid(row=3, column=0)
+                          "Bu kategoride acilan her yeni kanal icin alarm calar.\nAsagidakilerden birini doldurman yeterli.")
+        ctk.CTkLabel(c, text="Kategori adi  (onerilen)", font=font(13, "bold"), text_color=TEXT,
+                     anchor="w").grid(row=2, column=0, sticky="w", padx=18, pady=(12, 0))
+        ctk.CTkLabel(c, text="Ticket botu kategoriyi silip yeniden acsa da calisir. Adin icinde gecen\n"
+                             "bir kelime yeterli, buyuk/kucuk harf fark etmez (ornek: ticket).",
+                     font=font(11), text_color=MUTED, anchor="w", justify="left").grid(
+            row=3, column=0, sticky="w", padx=18)
+        self._entry(c, 4, "category_names", placeholder="Kategori adi (birden fazlaysa virgulle ayir)")
+        ctk.CTkLabel(c, text="Kategori ID", font=font(13, "bold"), text_color=TEXT,
+                     anchor="w").grid(row=5, column=0, sticky="w", padx=18, pady=(12, 0))
+        ctk.CTkLabel(c, text="Kategori hic silinmiyorsa kullan. Discord'da Gelistirici Modu acikken\n"
+                          "kategoriye sag tik > ID'yi Kopyala.",
+                     font=font(11), text_color=MUTED, anchor="w", justify="left").grid(row=6, column=0, sticky="w", padx=18)
+        self._entry(c, 7, "category_ids", placeholder="Kategori ID (birden fazlaysa virgulle ayir)")
+        ctk.CTkFrame(c, height=12, fg_color="transparent").grid(row=8, column=0)
 
         c = self._section(body, "♪", "Bildirim", "Ticket gelince bu bilgisayarda ses calar ve bildirim cikar.")
         srow = ctk.CTkFrame(c, fg_color="transparent")
@@ -1078,6 +1129,7 @@ class App:
         return {
             "token": self.vars["token"].get().strip(),
             "category_ids": parse_ids(self.vars["category_ids"].get()),
+            "category_names": parse_names(self.vars["category_names"].get()),
             "sound_repeat": int(self.sound_repeat.get()),
             "sound_file": self.sound_file,
             "bring_front": bool(self.bring_front.get()),
@@ -1111,9 +1163,9 @@ class App:
             self.show_page("ayarlar")
             messagebox.showwarning(APP_NAME, "Once Ayarlar'dan bot token'ini gir.")
             return
-        if not cfg["category_ids"]:
+        if not has_target(cfg):
             self.show_page("ayarlar")
-            messagebox.showwarning(APP_NAME, "Once Ayarlar'dan ticket kategorisinin ID'sini gir.")
+            messagebox.showwarning(APP_NAME, "Once Ayarlar'dan ticket kategorisinin adini ya da ID'sini gir.")
             return
         if not cfg["sound_repeat"]:
             messagebox.showwarning(APP_NAME, "Ses tekrari 0; ticket gelince ses calmaz.")
@@ -1348,7 +1400,7 @@ def main():
         if app.tray:
             root.withdraw()
         cfg = app.collect_config()
-        if cfg["token"] and cfg["category_ids"]:
+        if cfg["token"] and has_target(cfg):
             root.after(500, app.start)
     root.mainloop()
 
