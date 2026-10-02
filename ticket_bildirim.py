@@ -436,6 +436,7 @@ class BotRunner:
     def __init__(self, cfg, events):
         self.cfg = cfg
         self.events = events
+        self.message_turn = 0  # sirayla mesaj: kacinci ticket
         self.loop = None
         self.client = None
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -555,8 +556,15 @@ class BotRunner:
             if ticket:
                 path = f"channels/{channel.guild.id}/{channel.id}"
                 link = (f"discord://-/{path}", f"https://discord.com/{path}")
-                self._emit("ticket", channel.guild.name, channel.name, link)
-                if cfg.get("auto_message") and (cfg.get("message_text") or "").strip():
+                auto = bool(cfg.get("auto_message") and (cfg.get("message_text") or "").strip())
+                manual = False
+                if auto and cfg.get("message_alternate"):
+                    # Sirayla: 1. ticket'a bot yazar, 2. ticket'a sen, 3.'ye bot...
+                    self.message_turn += 1
+                    auto = self.message_turn % 2 == 1
+                    manual = not auto
+                self._emit("ticket", channel.guild.name, channel.name, link, manual)
+                if auto:
                     asyncio.ensure_future(self._send_message(channel))
             else:
                 self._emit("log", f"Kanal acildi ama ticket degil: #{channel.name}")
@@ -757,6 +765,7 @@ class App:
         self.auto_message = tk.BooleanVar(value=bool(cfg.get("auto_message", False)))
         self.message_text = cfg.get("message_text", DEFAULT_MESSAGE)
         self.message_delay = tk.IntVar(value=int(cfg.get("message_delay", 2)))
+        self.message_alternate = tk.BooleanVar(value=bool(cfg.get("message_alternate", False)))
         self.sound_repeat = tk.IntVar(value=int(cfg.get("sound_repeat", 1) or 0))
         self.sound_file = cfg.get("sound_file", "")
         self.bring_front = tk.BooleanVar(value=bool(cfg.get("bring_front", True)))
@@ -1093,9 +1102,18 @@ class App:
         self.delay_lbl.grid(row=0, column=2, padx=(12, 0))
         ctk.CTkLabel(c, text="Ticket botunun mesajindan sonra gitsin diye mesaj bu kadar saniye bekler.",
                      font=font(11), text_color=MUTED, anchor="w").grid(
-            row=7, column=0, sticky="w", padx=18, pady=(0, 16))
+            row=7, column=0, sticky="w", padx=18, pady=(0, 0))
         drow.grid_configure(pady=(8, 0))
         self._delay_text()
+        sw = ctk.CTkSwitch(c, text="Sirayla yaz  (1. ticket'a bot, 2. ticket'a sen, 3.'ye bot...)",
+                           variable=self.message_alternate, font=font(13, "bold"), text_color=TEXT,
+                           progress_color=ACCENT, button_color=TEXT, button_hover_color="white",
+                           fg_color=BORDER)
+        sw.grid(row=8, column=0, sticky="w", padx=18, pady=(14, 0))
+        self.inputs.append(sw)
+        ctk.CTkLabel(c, text="Sira sendeyken bot yazmaz; program 'bu ticket'a sen yaz' diye haber verir.",
+                     font=font(11), text_color=MUTED, anchor="w").grid(
+            row=9, column=0, sticky="w", padx=18, pady=(4, 16))
 
         c = self._section(body, "♪", "Bildirim", "Ticket gelince bu bilgisayarda ses calar ve bildirim cikar.")
         srow = ctk.CTkFrame(c, fg_color="transparent")
@@ -1172,21 +1190,24 @@ class App:
         t = ctk.CTkFrame(self.canvas, fg_color=CARD, corner_radius=0, border_width=2,
                          border_color=ACCENT)
         ctk.CTkFrame(t, width=6, corner_radius=0, fg_color=ACCENT).pack(side="left", fill="y")
+        # Buton once yerlesiyor ki uzun yazi onu kutunun disina itmesin
+        self.toast_btn = ctk.CTkButton(t, text="Kanala git  ›", width=110, height=36, corner_radius=8,
+                                       font=font(12, "bold"), fg_color=ACCENT, hover_color=ACCENT_H)
+        self.toast_btn.pack(side="right", padx=14)
         inner = ctk.CTkFrame(t, fg_color="transparent")
         inner.pack(side="left", fill="both", expand=True, padx=16, pady=12)
-        ctk.CTkLabel(inner, text="⚠  YENI TICKET", font=font(12, "bold"), text_color=ACCENT,
-                     anchor="w").pack(anchor="w")
+        self.toast_head = ctk.CTkLabel(inner, text="", font=font(12, "bold"), anchor="w")
+        self.toast_head.pack(anchor="w")
         self.toast_name = ctk.CTkLabel(inner, text="", font=font(18, "bold"), text_color=TEXT, anchor="w")
         self.toast_name.pack(anchor="w")
         self.toast_sub = ctk.CTkLabel(inner, text="", font=font(11), text_color=MUTED, anchor="w")
         self.toast_sub.pack(anchor="w")
-        self.toast_btn = ctk.CTkButton(t, text="Kanala git  ›", width=110, height=36, corner_radius=8,
-                                       font=font(12, "bold"), fg_color=ACCENT, hover_color=ACCENT_H)
-        self.toast_btn.pack(side="right", padx=14)
         self.toast_item = self.canvas.create_window(0, 0, window=t, anchor="nw", state="hidden")
 
-    def show_toast(self, guild, name, link):
+    def show_toast(self, guild, name, link, manual=False):
         self.toast_name.configure(text=f"#{name}")
+        self.toast_head.configure(text="⚠  SIRA SENDE" if manual else "⚠  YENI TICKET",
+                                  text_color=YELLOW if manual else ACCENT)
         self.toast_sub.configure(text=f"{guild}  •  {time.strftime('%H:%M:%S')}")
         self.toast_btn.configure(command=lambda: (stop_sound(), open_link(*link), self.hide_toast()))
         self.canvas.itemconfigure(self.toast_item, state="normal")
@@ -1257,6 +1278,7 @@ class App:
             "auto_message": bool(self.auto_message.get()),
             "message_text": self.message_box.get("1.0", "end").strip(),
             "message_delay": int(self.message_delay.get()),
+            "message_alternate": bool(self.message_alternate.get()),
             "sound_repeat": int(self.sound_repeat.get()),
             "sound_file": self.sound_file,
             "bring_front": bool(self.bring_front.get()),
@@ -1332,7 +1354,8 @@ class App:
         self.on_ticket("Test", "test-ticket",
                        ("discord://-/channels/@me", "https://discord.com/channels/@me"))
 
-    def on_ticket(self, guild, name, link):
+    def on_ticket(self, guild, name, link, manual=False):
+        """manual=True: sirayla yazmada sira kullanicida, bot bu ticket'a yazmadi."""
         cfg = self.cfg if self.runner else self.collect_config()
         when = time.strftime("%H:%M:%S")
         self.empty.grid_forget()
@@ -1342,15 +1365,16 @@ class App:
             r.grid(row=i, column=0, sticky="ew", pady=4)
         self.count += 1
         self.stat_count.set(f"{self.count} ticket")
-        self.log(f"Yeni ticket: #{name} ({guild})")
+        self.log(f"Yeni ticket: #{name} ({guild})" + ("  •  SIRA SENDE: bu ticket'a sen yaz" if manual else ""))
         self.last_link = link
 
         play_sound(cfg.get("sound_repeat", 1), cfg.get("sound_file", ""))
         if cfg.get("windows_toast", True):
-            windows_toast("Yeni ticket acildi", f"#{name}  •  {guild}", link[0], self.toast_icon,
+            windows_toast("Yeni ticket - sira sende, sen yaz" if manual else "Yeni ticket acildi",
+                          f"#{name}  •  {guild}", link[0], self.toast_icon,
                           report=lambda msg: self.events.put(("toast_error", msg)))
         flash_window(self.root)
-        self.show_toast(guild, name, link)
+        self.show_toast(guild, name, link, manual)
         self.start_alarm()
         if self.page != "panel":
             self.show_page("panel")
