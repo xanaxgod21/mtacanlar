@@ -157,6 +157,16 @@ def looks_like_ticket(channel_name, category_name):
     return name_matches(category_name, TICKET_WORDS) or name_matches(channel_name, TICKET_WORDS)
 
 
+DEFAULT_MESSAGE = "Merhaba {acan}, ticketin alindi. En kisa surede ilgilenecegim."
+
+
+def format_message(template, channel_name, guild_name, opener_mention):
+    # Mesajdaki degiskenleri doldurur: {acan} {kanal} {sunucu}
+    return (template.replace("{acan}", opener_mention)
+                    .replace("{kanal}", f"#{channel_name}")
+                    .replace("{sunucu}", guild_name)).strip()
+
+
 def has_target(cfg):
     return bool(cfg.get("auto_detect", True) or cfg.get("category_ids") or cfg.get("category_names"))
 
@@ -476,6 +486,26 @@ class BotRunner:
                                 "Bota Yonetici yetkisi olan bir rol ver.")
         return problems
 
+    async def _send_message(self, channel):
+        """Ticket kanalina, ticket botunun mesajindan sonra, belirlenen mesaji bot hesabiyla atar."""
+        cfg = self.cfg
+        await asyncio.sleep(max(0.0, float(cfg.get("message_delay", 2))))
+        # Ticket'i acan kisi: kanalda ozel izni olan, bot olmayan uye
+        opener = next((t for t in channel.overwrites
+                       if isinstance(t, discord.Member) and not t.bot), None)
+        text = format_message(cfg.get("message_text", ""), channel.name, channel.guild.name,
+                              opener.mention if opener else "")
+        if not text:
+            return
+        try:
+            await channel.send(text[:2000], allowed_mentions=discord.AllowedMentions(
+                users=True, roles=False, everyone=False))
+            self._emit("log", f"Mesaj atildi: #{channel.name}")
+        except discord.Forbidden:
+            self._emit("log", f"#{channel.name} kanalina mesaj atilamadi: botun yazma izni yok.")
+        except Exception as e:
+            self._emit("log", f"#{channel.name} kanalina mesaj atilamadi: {e}")
+
     async def _creator(self, channel):
         """Kanali kim acti? Denetim kaydindan bakar; izin yoksa None doner."""
         for _ in range(4):
@@ -526,6 +556,8 @@ class BotRunner:
                 path = f"channels/{channel.guild.id}/{channel.id}"
                 link = (f"discord://-/{path}", f"https://discord.com/{path}")
                 self._emit("ticket", channel.guild.name, channel.name, link)
+                if cfg.get("auto_message") and (cfg.get("message_text") or "").strip():
+                    asyncio.ensure_future(self._send_message(channel))
             else:
                 self._emit("log", f"Kanal acildi ama ticket degil: #{channel.name}")
 
@@ -721,6 +753,10 @@ class App:
             "category_names": tk.StringVar(value=", ".join(cfg.get("category_names") or [])),
         }
         self.auto_detect = tk.BooleanVar(value=bool(cfg.get("auto_detect", True)))
+        self.auto_open = tk.BooleanVar(value=bool(cfg.get("auto_open", False)))
+        self.auto_message = tk.BooleanVar(value=bool(cfg.get("auto_message", False)))
+        self.message_text = cfg.get("message_text", DEFAULT_MESSAGE)
+        self.message_delay = tk.IntVar(value=int(cfg.get("message_delay", 2)))
         self.sound_repeat = tk.IntVar(value=int(cfg.get("sound_repeat", 1) or 0))
         self.sound_file = cfg.get("sound_file", "")
         self.bring_front = tk.BooleanVar(value=bool(cfg.get("bring_front", True)))
@@ -1022,6 +1058,45 @@ class App:
             self._entry(c, row + 1, key).grid_configure(pady=(4, 4))
         ctk.CTkFrame(c, height=12, fg_color="transparent").grid(row=10, column=0)
 
+        c = self._section(body, "➤", "Otomatik islemler", "Ticket gelince senin yerine yapilacaklar.")
+        sw = ctk.CTkSwitch(c, text="Discord'u otomatik ac ve ticket'a git", variable=self.auto_open,
+                           font=font(13, "bold"), text_color=TEXT, progress_color=ACCENT,
+                           button_color=TEXT, button_hover_color="white", fg_color=BORDER)
+        sw.grid(row=2, column=0, sticky="w", padx=18, pady=(12, 0))
+        self.inputs.append(sw)
+        sw = ctk.CTkSwitch(c, text="Ticket'a otomatik mesaj at", variable=self.auto_message,
+                           font=font(13, "bold"), text_color=TEXT, progress_color=ACCENT,
+                           button_color=TEXT, button_hover_color="white", fg_color=BORDER)
+        sw.grid(row=3, column=0, sticky="w", padx=18, pady=(14, 0))
+        self.inputs.append(sw)
+        ctk.CTkLabel(c, text="Mesaj botun hesabindan gider. Kullanabilecegin degiskenler:\n"
+                             "{acan} = ticket'i acani etiketler   {kanal} = kanal adi   {sunucu} = sunucu adi",
+                     font=font(11), text_color=MUTED, anchor="w", justify="left").grid(
+            row=4, column=0, sticky="w", padx=18, pady=(4, 0))
+        self.message_box = ctk.CTkTextbox(c, height=90, corner_radius=8, fg_color=FIELD,
+                                          border_color=BORDER_HI, border_width=1, text_color=TEXT,
+                                          font=font(13), wrap="word")
+        self.message_box.grid(row=5, column=0, columnspan=2, sticky="ew", padx=18, pady=(8, 4))
+        self.message_box.insert("1.0", self.message_text)
+        self.inputs.append(self.message_box)
+        drow = ctk.CTkFrame(c, fg_color="transparent")
+        drow.grid(row=6, column=0, columnspan=2, sticky="ew", padx=18, pady=(8, 16))
+        drow.columnconfigure(1, weight=1)
+        ctk.CTkLabel(drow, text="Bekleme", font=font(13, "bold"), text_color=TEXT).grid(row=0, column=0, padx=(0, 14))
+        dslider = ctk.CTkSlider(drow, from_=0, to=10, number_of_steps=10, height=18,
+                                variable=self.message_delay, progress_color=ACCENT,
+                                button_color=ACCENT, button_hover_color=GLOW, fg_color=BORDER,
+                                command=lambda _v: self._delay_text())
+        dslider.grid(row=0, column=1, sticky="ew")
+        self.inputs.append(dslider)
+        self.delay_lbl = ctk.CTkLabel(drow, text="", width=64, font=font(13, "bold"), text_color=ACCENT)
+        self.delay_lbl.grid(row=0, column=2, padx=(12, 0))
+        ctk.CTkLabel(c, text="Ticket botunun mesajindan sonra gitsin diye mesaj bu kadar saniye bekler.",
+                     font=font(11), text_color=MUTED, anchor="w").grid(
+            row=7, column=0, sticky="w", padx=18, pady=(0, 16))
+        drow.grid_configure(pady=(8, 0))
+        self._delay_text()
+
         c = self._section(body, "♪", "Bildirim", "Ticket gelince bu bilgisayarda ses calar ve bildirim cikar.")
         srow = ctk.CTkFrame(c, fg_color="transparent")
         srow.grid(row=2, column=0, columnspan=2, sticky="ew", padx=18, pady=(12, 4))
@@ -1136,6 +1211,9 @@ class App:
         self.root.after(280, self._alarm_step)
 
     # --- islemler ---
+    def _delay_text(self):
+        self.delay_lbl.configure(text=f"{int(self.message_delay.get())} sn")
+
     def _sound_text(self):
         n = int(self.sound_repeat.get())
         self.sound_lbl.configure(text="Kapali" if n == 0 else f"{n} kez")
@@ -1175,6 +1253,10 @@ class App:
             "category_ids": parse_ids(self.vars["category_ids"].get()),
             "category_names": parse_names(self.vars["category_names"].get()),
             "auto_detect": bool(self.auto_detect.get()),
+            "auto_open": bool(self.auto_open.get()),
+            "auto_message": bool(self.auto_message.get()),
+            "message_text": self.message_box.get("1.0", "end").strip(),
+            "message_delay": int(self.message_delay.get()),
             "sound_repeat": int(self.sound_repeat.get()),
             "sound_file": self.sound_file,
             "bring_front": bool(self.bring_front.get()),
@@ -1272,7 +1354,10 @@ class App:
         self.start_alarm()
         if self.page != "panel":
             self.show_page("panel")
-        if cfg.get("bring_front", True):
+        if cfg.get("auto_open"):
+            # Discord one gelecegi icin bu pencereyi one getirmiyoruz
+            open_link(*link)
+        elif cfg.get("bring_front", True):
             self.root.deiconify()
             self.root.lift()
             self.root.attributes("-topmost", True)
