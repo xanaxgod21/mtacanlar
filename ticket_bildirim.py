@@ -436,7 +436,7 @@ class BotRunner:
     def __init__(self, cfg, events):
         self.cfg = cfg
         self.events = events
-        self.message_turn = 0  # sirayla mesaj: kacinci ticket
+        self.message_turn = 0  # bu oturumda kacinci ticket
         self.loop = None
         self.client = None
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -558,10 +558,10 @@ class BotRunner:
                 link = (f"discord://-/{path}", f"https://discord.com/{path}")
                 auto = bool(cfg.get("auto_message") and (cfg.get("message_text") or "").strip())
                 manual = False
-                if auto and cfg.get("message_alternate"):
-                    # Sirayla: 1. ticket'a bot yazar, 2. ticket'a sen, 3.'ye bot...
+                if auto and cfg.get("message_first_only"):
+                    # Sadece Baslat'tan sonraki ilk ticket'a bot yazar, sonrakilere kullanici
                     self.message_turn += 1
-                    auto = self.message_turn % 2 == 1
+                    auto = self.message_turn == 1
                     manual = not auto
                 self._emit("ticket", channel.guild.name, channel.name, link, manual)
                 if auto:
@@ -765,7 +765,7 @@ class App:
         self.auto_message = tk.BooleanVar(value=bool(cfg.get("auto_message", False)))
         self.message_text = cfg.get("message_text", DEFAULT_MESSAGE)
         self.message_delay = tk.IntVar(value=int(cfg.get("message_delay", 2)))
-        self.message_alternate = tk.BooleanVar(value=bool(cfg.get("message_alternate", False)))
+        self.message_first_only = tk.BooleanVar(value=bool(cfg.get("message_first_only", False)))
         self.sound_repeat = tk.IntVar(value=int(cfg.get("sound_repeat", 1) or 0))
         self.sound_file = cfg.get("sound_file", "")
         self.bring_front = tk.BooleanVar(value=bool(cfg.get("bring_front", True)))
@@ -1105,14 +1105,15 @@ class App:
             row=7, column=0, sticky="w", padx=18, pady=(0, 0))
         drow.grid_configure(pady=(8, 0))
         self._delay_text()
-        sw = ctk.CTkSwitch(c, text="Sirayla yaz  (1. ticket'a bot, 2. ticket'a sen, 3.'ye bot...)",
-                           variable=self.message_alternate, font=font(13, "bold"), text_color=TEXT,
+        sw = ctk.CTkSwitch(c, text="Sadece ilk ticket'a yaz  (sonrakilere sen yazarsin)",
+                           variable=self.message_first_only, font=font(13, "bold"), text_color=TEXT,
                            progress_color=ACCENT, button_color=TEXT, button_hover_color="white",
                            fg_color=BORDER)
         sw.grid(row=8, column=0, sticky="w", padx=18, pady=(14, 0))
         self.inputs.append(sw)
-        ctk.CTkLabel(c, text="Sira sendeyken bot yazmaz; program 'bu ticket'a sen yaz' diye haber verir.",
-                     font=font(11), text_color=MUTED, anchor="w").grid(
+        ctk.CTkLabel(c, text="Baslat'a bastiktan sonra gelen ilk ticket'a bot yazar. Sonrakilerde bot yazmaz,\n"
+                             "program 'sira sende' diye haber verir. Durdur/Baslat yapinca sayim sifirlanir.",
+                     font=font(11), text_color=MUTED, anchor="w", justify="left").grid(
             row=9, column=0, sticky="w", padx=18, pady=(4, 16))
 
         c = self._section(body, "♪", "Bildirim", "Ticket gelince bu bilgisayarda ses calar ve bildirim cikar.")
@@ -1278,7 +1279,7 @@ class App:
             "auto_message": bool(self.auto_message.get()),
             "message_text": self.message_box.get("1.0", "end").strip(),
             "message_delay": int(self.message_delay.get()),
-            "message_alternate": bool(self.message_alternate.get()),
+            "message_first_only": bool(self.message_first_only.get()),
             "sound_repeat": int(self.sound_repeat.get()),
             "sound_file": self.sound_file,
             "bring_front": bool(self.bring_front.get()),
@@ -1355,7 +1356,7 @@ class App:
                        ("discord://-/channels/@me", "https://discord.com/channels/@me"))
 
     def on_ticket(self, guild, name, link, manual=False):
-        """manual=True: sirayla yazmada sira kullanicida, bot bu ticket'a yazmadi."""
+        """manual=True: bot bu ticket'a yazmadi, kullanici yazacak."""
         cfg = self.cfg if self.runner else self.collect_config()
         when = time.strftime("%H:%M:%S")
         self.empty.grid_forget()
