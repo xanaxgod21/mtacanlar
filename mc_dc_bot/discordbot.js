@@ -381,6 +381,14 @@ function odaIzinleri(guild, userId, acik) {
   ]
 }
 
+// yetkili_rol_id sonradan eklendiyse, rol eklenmeden önce açılan odalara da izin ver
+async function yetkiliIzni(kanal) {
+  if (!yetkiliRol || kanal.permissionOverwrites.cache?.has(yetkiliRol.id)) return
+  await kanal.permissionOverwrites
+    .edit(yetkiliRol.id, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }, { type: OverwriteType.Role })
+    .catch((e) => adminLog(`⚠️ Yetkili rolüne oda izni verilemedi (#${kanal.name}): ${e.message}`))
+}
+
 // Süre dolunca müşteri odasını görür ama yazamaz (thread açıp da yazamaz);
 // komutlar (yeni key) çalışır. null = sunucudaki varsayılan izin
 function odaKilit(kanal, userId, kilitli) {
@@ -432,7 +440,11 @@ async function odaHazirla(guild, l) {
   let kanal = await kanalGetir(l.kanalId)
   if (kanal) {
     await odaKilit(kanal, l.userId, false)
-    await kanal.setTopic?.(odaBasligi(l)).catch(() => {})
+    await yetkiliIzni(kanal)
+    // Discord kanal başlığını 10 dakikada 2 kez değiştirtir; fazlasında discord.js
+    // dakikalarca bekler. O yüzden sadece değiştiyse ve cevabı bekletmeden.
+    const baslik = odaBasligi(l)
+    if (kanal.topic !== baslik) kanal.setTopic?.(baslik).catch(() => {})
     return { kanal, yeni: false }
   }
   const parent = await kategoriBul(guild)
@@ -690,6 +702,14 @@ client.once(Events.ClientReady, async () => {
     if (YETKILI_ROL_ID) {
       yetkiliRol = await guild.roles?.fetch?.(YETKILI_ROL_ID).catch(() => null)
       if (!yetkiliRol) adminLog(`⚠️ yetkili_rol_id (${YETKILI_ROL_ID}) bu sunucuda bulunamadı, yetkili rolü kapalı.`)
+      // rol sonradan eklendiyse mevcut odalar da yetkililere açılsın (arka planda)
+      else
+        (async () => {
+          for (const l of depo.ozetListe().lisanslar) {
+            const kanal = await kanalGetir(l.kanalId).catch(() => null)
+            if (kanal) await yetkiliIzni(kanal)
+          }
+        })().catch(() => {})
     }
     // Eksik izin varsa key yanmadan önce satıcı bilsin
     const ben = guild.members?.me ?? (await guild.members?.fetchMe?.().catch(() => null))
@@ -830,6 +850,8 @@ async function odaKomutu(i, l) {
     const engel = yerelIzin ? null : await hedefKontrol(host, port)
     if (engel) return i.editReply(engel)
     if (yonetici.calisiyor(uid)) return i.editReply('Botun zaten çalışıyor. Önce /durdur yaz.')
+    // adres kontrolü birkaç saniye sürebilir; bu arada lisans dolmuş/iptal edilmiş olabilir
+    if (!depo.aktifMi(depo.bul(uid))) return i.editReply('Lisans süren doldu, bot başlatılmadı. Yeni key: /key-gir')
 
     const ayar = { host, port, user, auth, version, owner, yerelIzin }
     try {
@@ -1045,13 +1067,19 @@ async function saticiKomutu(i) {
     const oncekiAi = depo.aiAktifMi(depo.bul(u.id))
     const l = depo.uzat(u.id, s.sure)
     aiDegistiyse(l, oncekiAi)
-    // süresi bitip odası silindiyse yeniden açılır
+    // süresi bitip odası silindiyse yeniden açılır. Müşteri o an key girip /odam
+    // yazıyorsa oda onun işleminde açılır (aynı anda iki oda açılmasın)
     let kanal = null
-    try {
-      ;({ kanal } = await odaHazirla(i.guild, l))
-      await kanal.send({ content: `<@${u.id}> lisansın uzatıldı. Yeni bitiş: ${bitisDiscord(l)}`, allowedMentions: { users: [u.id] } })
-    } catch (e) {
-      adminLog(`⚠️ ${u.tag} odası açılamadı: ${e.message}`)
+    if (!islemde.has(u.id)) {
+      islemde.add(u.id)
+      try {
+        ;({ kanal } = await odaHazirla(i.guild, l))
+        await kanal.send({ content: `<@${u.id}> lisansın uzatıldı. Yeni bitiş: ${bitisDiscord(l)}`, allowedMentions: { users: [u.id] } })
+      } catch (e) {
+        adminLog(`⚠️ ${u.tag} odası açılamadı: ${e.message}`)
+      } finally {
+        islemde.delete(u.id)
+      }
     }
     adminLog(`⏩ ${i.user.tag}: ${u.tag} lisansı ${sureYazi(s.sure)} uzatıldı. Bitiş: ${bitisYazi(l)}`)
     return i.editReply(`${u.tag} yeni bitiş: ${bitisDiscord(l)}${kanal ? `\nOdası: <#${kanal.id}>` : ''}`)
@@ -1065,7 +1093,8 @@ async function saticiKomutu(i) {
     depo.iptalEt(u.id)
     yonetici.durdur(u.id)
     const silindi = await odaSil(depo.bul(u.id), 'Lisans iptal edildi')
-    await dmGonder(u.id, 'Yaren lisansın satıcı tarafından iptal edildi, botun durduruldu ve odan kapatıldı.')
+    if (!silindi) await odayaBildir(depo.bul(u.id), `<@${u.id}> lisansın satıcı tarafından iptal edildi, botun durduruldu.`, true)
+    await dmGonder(u.id, `Yaren lisansın satıcı tarafından iptal edildi, botun durduruldu${silindi ? ' ve odan kapatıldı' : ''}.`)
     adminLog(`⛔ ${i.user.tag}: ${u.tag} lisansı iptal edildi.`)
     return i.editReply(`${u.tag} lisansı iptal edildi${silindi ? ', odası silindi' : ''}.`)
   }
@@ -1130,14 +1159,21 @@ async function zamanKontrol() {
     )
   }
   for (const l of dolan) {
+    // önceki odalar silinirken bu kişi yeni key girmiş olabilir
+    if (depo.aktifMi(depo.bul(l.userId))) continue
     denemeIptal(l.userId)
     yonetici.durdur(l.userId)
     adminLog(`⌛ ${l.kullaniciAdi} (${l.userId}) lisansı doldu.`)
     if (ODA_SILME_SAAT === 0) {
-      await odaSil(l, 'Lisans süresi doldu')
+      const silindi = await odaSil(l, 'Lisans süresi doldu')
+      if (depo.aktifMi(depo.bul(l.userId))) continue
+      // silinemediyse (izin yok, Discord'a ulaşılamadı) en azından yazamasın
+      if (!silindi) {
+        await odayaBildir(l, `<@${l.userId}> lisans süren doldu, botun durduruldu. Yeni key girersen (/key-gir) kaldığın yerden devam edersin.`, true)
+      }
       await dmGonder(
         l.userId,
-        'Yaren lisans süren doldu, botun durduruldu ve odan kapatıldı. Yeni key girersen (panelde Key Gir) odan ayarlarınla birlikte geri açılır.'
+        `Yaren lisans süren doldu, botun durduruldu${silindi ? ' ve odan kapatıldı' : ''}. Yeni key girersen (panelde Key Gir) odan ayarlarınla birlikte geri açılır.`
       )
     } else {
       await odayaBildir(
@@ -1157,23 +1193,39 @@ async function zamanKontrol() {
   for (const l of sonSaat) {
     await odayaBildir(l, `<@${l.userId}> ⏰ lisans süren ${zaman(l.bitis, 'R')} bitiyor!${sonra}`)
   }
+  // Güvenlik ağı: lisansı bitmiş/iptal edilmiş ama bir şekilde çalışan bot kalmasın
+  for (const l of depo.ozetListe().lisanslar) {
+    if (yonetici.calisiyor(l.userId) && !depo.aktifMi(l)) {
+      denemeIptal(l.userId)
+      yonetici.durdur(l.userId)
+      adminLog(`⏹️ ${l.kullaniciAdi} lisansı kapalı olduğu halde çalışan botu durduruldu.`)
+    }
+  }
 }
 setInterval(() => zamanKontrol().catch((e) => console.error('Süre kontrolü:', e.message)), 60000)
 
 // Müşterinin odasını siler. Lisans kaydı (ayarlar, sandıklar, deneyim) kalır;
 // yeni key girerse odası yeniden açılır.
+const silinemeyen = new Set() // her 10 dakikada aynı hatayla log kanalını doldurmasın
 async function odaSil(l, neden) {
   if (!l?.kanalId) return false
   const kanalId = l.kanalId
   try {
     const kanal = await kanalGetir(kanalId) // geçici hatada fırlatır: kayıt silinmez
+    // beklerken yeni key girilmiş ya da oda değişmiş olabilir
+    const guncel = depo.bul(l.userId)
+    if (!guncel || guncel.kanalId !== kanalId || depo.aktifMi(guncel)) return false
     if (kanal) await kanal.delete(neden)
     depo.kanalAyarla(l.userId, null)
     kuyruklar.delete(kanalId)
+    silinemeyen.delete(kanalId)
     adminLog(`🗑️ ${l.kullaniciAdi} odası silindi (${neden}).`)
     return true
   } catch (e) {
-    adminLog(`⚠️ ${l.kullaniciAdi} odası silinemedi: ${e.message}`)
+    if (!silinemeyen.has(kanalId)) {
+      silinemeyen.add(kanalId)
+      adminLog(`⚠️ ${l.kullaniciAdi} odası silinemedi: ${e.message} (botun bu kanalı yönetme izni var mı?)`)
+    }
     return false
   }
 }
