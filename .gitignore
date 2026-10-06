@@ -8,5 +8,5 @@ __pycache__/
 mc_dc_bot/ayarlar.json
 mc_dc_bot/anahtar.txt
 mc_dc_bot/deneyim.json
-mc_dc_bot/deneyim.json.bozuk*
+mc_dc_bot/deneyim.json.*
 mc_dc_bot/node_modules/

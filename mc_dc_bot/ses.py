@@ -12,6 +12,7 @@
 # (oduncu, farm, taş, gel, görev iptal ...).
 
 import json
+import time
 import urllib.error
 import urllib.request
 
@@ -36,6 +37,7 @@ KOMUTLAR = [
     ("farm", ["farm", "çiftçi", "ürün", "ekin", "hasat"], ["Yaparım tamam"], False),
     ("tas", ["taş", "madenci"], ["Yaparım tamam"], False),
     ("gel", ["gel"], ["Yaparım tamam"], False),
+    ("topla", ["topla", "eşya"], ["Yaparım tamam"], False),
     ("otonom", ["otonom", "kendi başına"], ["Yaparım tamam"], False),
 ]
 
@@ -99,12 +101,21 @@ def anahtar_kelime_modu(metin):
         return False
     komut, cevaplar, devam = sonuc
     try:
-        post(URL_KOMUT, {"komut": komut}, 5)
+        yanit = post(URL_KOMUT, {"komut": komut}, 5)
     except Exception:
         konus("Bota ulaşamadım")
         return False
-    for c in cevaplar:
-        konus(c)
+    try:
+        cevap = json.loads(yanit).get("cevap")
+    except Exception:
+        cevap = None
+    # Botun kendi cevabını söyle: "durum" gerçekten durumu okusun, kazma yoksa
+    # "Yaparım tamam" deyip yapmıyormuş gibi olmasın. Cevap yoksa sabit cevap.
+    if cevap:
+        konus(cevap)
+    else:
+        for c in cevaplar:
+            konus(c)
     return devam
 
 
@@ -152,6 +163,7 @@ def main():
             continue
         except sr.RequestError as e:
             print("Tanıma servisi hatası:", e)
+            time.sleep(3)  # internet yokken saniyede onlarca hata basmasın
             continue
 
         print("Duyduğum:", metin)
@@ -165,7 +177,11 @@ def main():
                 komut_modu = True
                 continue
         else:
-            kalan = metin
+            # sohbet sürerken yine "Yaren" denirse onu cümleden çıkar
+            kalan = uyandirma_sil(metin).strip() if uyandirma_var(metin) else metin
+            if not kalan:
+                konus("Efendim")
+                continue
 
         komut_modu = cevapla(kalan)
 

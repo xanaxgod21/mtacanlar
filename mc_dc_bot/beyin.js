@@ -10,23 +10,27 @@
 // Hareket, kırma ve ekme işini hâlâ gorevbot.js'deki kod yapar.
 
 const fs = require('fs')
+const path = require('path')
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
+const API_TIMEOUT_MS = 30000
 const MAX_DERS = 40
 const MAX_OLAY = 100
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const TOOLS = [
   {
     name: 'gorev_baslat',
     description:
-      'Bir görev başlatır. farm: olgun ekinleri toplar ve yeniden eker. odun: ağaç bulup tamamen keser, yaprakları temizler, fidan diker. tas: taş ve cobblestone kırar (kazma gerekir). Çalışan görev varsa onu bırakıp yenisine geçer.',
+      'Bir görev başlatır. farm: olgun ekinleri toplar ve yeniden eker. odun: ağaç bulup tamamen keser, fidan diker (ev gibi yapılara dokunmaz). tas: doğal taş kırar, cobblestone yapılara dokunmaz (kazma gerekir). Envanter doluysa görev başlamaz. Çalışan görev varsa onu bırakıp yenisine geçer.',
     input_schema: {
       type: 'object',
       properties: {
         gorev: { type: 'string', enum: ['farm', 'odun', 'tas'] },
         dakika: {
           type: 'integer',
-          description: 'Kaç dakika çalışsın. Boşsa sen durdurana kadar.',
+          description: 'Kaç dakika çalışsın. Boşsa durdurulana kadar. Otonom modda en fazla 8.',
         },
       },
       required: ['gorev'],
@@ -80,17 +84,34 @@ function createBrain({ apiKey, model, owner, dataFile, log, getState, actions, f
 
   // ---------- Deneyim defteri ----------
   let data = { dersler: [], olaylar: [] }
+  let ham = ''
   try {
-    const raw = JSON.parse(fs.readFileSync(dataFile, 'utf-8'))
-    data = {
-      dersler: Array.isArray(raw.dersler) ? raw.dersler : [],
-      olaylar: Array.isArray(raw.olaylar) ? raw.olaylar : [],
+    ham = fs.readFileSync(dataFile, 'utf-8')
+  } catch (_) {} // dosya yoksa sıfırdan başla
+  if (ham.trim()) {
+    try {
+      const raw = JSON.parse(ham.replace(/^\uFEFF/, ''))
+      data = {
+        dersler: Array.isArray(raw.dersler) ? raw.dersler : [],
+        olaylar: Array.isArray(raw.olaylar) ? raw.olaylar : [],
+      }
+    } catch (e) {
+      // Bozuk dosyanın üstüne yazıp bütün dersleri kaybetmeyelim: önce yedeğini al
+      const yedek = `${dataFile}.bozuk-${Date.now()}`
+      try {
+        fs.copyFileSync(dataFile, yedek)
+      } catch (_) {}
+      say('[ai] deneyim defteri bozuk, yedeği alındı:', path.basename(yedek))
     }
-  } catch (_) {}
+  }
 
   function save() {
     try {
-      fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf-8')
+      // Önce geçici dosyaya yaz, sonra yerine koy. Bot yazarken kapatılırsa
+      // (/durdur) deneyim.json yarım kalıp bozulmasın.
+      const tmp = dataFile + '.tmp'
+      fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8')
+      fs.renameSync(tmp, dataFile)
     } catch (e) {
       say('[ai] deneyim defteri kaydedilemedi:', e.message)
     }
@@ -144,20 +165,38 @@ ${dersler}`
 
   // ---------- API ----------
   async function callApi(system, messages) {
-    const r = await doFetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({ model, max_tokens: 500, system, tools: TOOLS, messages }),
-    })
-    if (!r.ok) {
+    // 429 (çok istek), 5xx ve 529 (aşırı yoğunluk) geçicidir: bekleyip 3 kez dene
+    for (let deneme = 1; ; deneme++) {
+      let r
+      try {
+        r = await doFetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({ model, max_tokens: 500, system, tools: TOOLS, messages }),
+          // Cevap hiç gelmezse sonsuza kadar bekleme: istekler sıraya girdiği
+          // için takılan tek istek bütün yapay zekayı kilitler.
+          signal: AbortSignal.timeout(API_TIMEOUT_MS),
+        })
+      } catch (e) {
+        if (deneme < 3) {
+          await sleep(1000 * deneme)
+          continue
+        }
+        throw new Error(e.name === 'TimeoutError' ? 'API zaman aşımı' : e.message)
+      }
+      if (r.ok) return r.json()
+      if ((r.status === 429 || r.status >= 500) && deneme < 3) {
+        const sn = Number(r.headers?.get?.('retry-after')) || deneme * 2
+        await sleep(Math.min(sn, 10) * 1000)
+        continue
+      }
       const t = await r.text().catch(() => '')
       throw new Error(`API ${r.status}: ${String(t).slice(0, 200)}`)
     }
-    return r.json()
   }
 
   async function runTool(name, input, ctx) {
@@ -188,6 +227,7 @@ ${dersler}`
     const messages = [...(history || []), { role: 'user', content: userText }]
     for (let round = 0; round < 6; round++) {
       const res = await callApi(system, messages)
+      res.content = res.content || []
       messages.push({ role: 'assistant', content: res.content })
       if (res.stop_reason !== 'tool_use') {
         return res.content

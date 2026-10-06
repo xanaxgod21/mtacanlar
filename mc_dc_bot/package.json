@@ -1,0 +1,20 @@
+{
+  "name": "mc-dc-bot",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Minecraft NPC (Yaren) ve onu yöneten Discord botu",
+  "main": "discordbot.js",
+  "scripts": {
+    "start": "node discordbot.js",
+    "bot": "node gorevbot.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "mineflayer": "^4.39.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "vec3": "^0.2.0"
+  }
+}
