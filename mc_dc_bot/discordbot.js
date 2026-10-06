@@ -381,8 +381,9 @@ function hosgeldin(l) {
     '`sahip`: botun oyunda sadece senin komutlarını dinlemesi için senin Minecraft adın.',
     'Bir kere yazman yeter, sonraki seferlerde sadece `/baslat` yazabilirsin.',
     '',
-    'Diğer komutlar: `/gorev` `/durum` `/soyle` `/durdur` `/bilgi`',
-    'Oyun içinde: `!odun` `!tas` `!farm` `!topla` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş.',
+    'Diğer komutlar: `/gorev` `/durum` `/sandik` `/soyle` `/durdur` `/bilgi`',
+    'Oyun içinde: `!odun` `!tas` `!farm` `!topla` `!bosalt` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş.',
+    '**Sandık:** oyunda sandığın dibinde dur ve `!sandik ekle` yaz. Bot envanteri yarı dolunca topladıklarını oraya bırakır, baltası kırılmak üzereyse oradan yenisini alır.',
   ].join('\n')
 }
 
@@ -490,6 +491,7 @@ const GOREV_SECENEK = [
   { name: 'otonom (kendi karar versin)', value: 'otonom' },
   { name: 'dur (görevi iptal et)', value: 'dur' },
   { name: 'gel', value: 'gel' },
+  { name: 'bosalt (sandığa bırak)', value: 'bosalt' },
   { name: 'durum', value: 'durum' },
 ]
 
@@ -528,6 +530,27 @@ const COMMANDS = [
     name: 'gorev',
     description: 'Botuna görev verir',
     options: [{ name: 'gorev', description: 'Ne yapsın?', type: S.String, required: true, choices: GOREV_SECENEK }],
+  },
+  {
+    name: 'sandik',
+    description: 'Botunun eşya bırakacağı sandıklar (oyunda sandığın dibinde durup "ekle" de diyebilirsin)',
+    options: [
+      {
+        name: 'islem',
+        description: 'Ne yapılsın?',
+        type: S.String,
+        required: true,
+        choices: [
+          { name: 'liste', value: 'liste' },
+          { name: 'ekle (koordinatsız: oyunda dibinde durduğun sandık)', value: 'ekle' },
+          { name: 'sil', value: 'sil' },
+          { name: 'temizle (hepsini unut)', value: 'temizle' },
+        ],
+      },
+      { name: 'x', description: 'Sandığın X koordinatı', type: S.Integer },
+      { name: 'y', description: 'Sandığın Y koordinatı', type: S.Integer },
+      { name: 'z', description: 'Sandığın Z koordinatı', type: S.Integer },
+    ],
   },
   {
     name: 'soyle',
@@ -571,7 +594,7 @@ const COMMANDS = [
   { name: 'panel-kur', description: 'Bu kanala "Key Gir" butonlu satış panelini koyar', ...SATICI },
 ]
 const SATICI_KOMUTLARI = new Set(COMMANDS.filter((c) => c.default_member_permissions === '0').map((c) => c.name))
-const ODA_KOMUTLARI = new Set(['baslat', 'durdur', 'durum', 'gorev', 'soyle'])
+const ODA_KOMUTLARI = new Set(['baslat', 'durdur', 'durum', 'gorev', 'sandik', 'soyle'])
 
 client.once(Events.ClientReady, async () => {
   console.log(`Discord botu hazır: ${client.user.tag}`)
@@ -766,6 +789,18 @@ async function odaKomutu(i, l) {
     const r = await yonetici.istek(uid, 'komut', { komut })
     if (r.kod !== 200) return i.editReply('Bota ulaşamadım: ' + (r.veri?.hata || r.kod))
     return i.editReply(`**${komut}** → ${r.veri.cevap || 'gönderildi'}`)
+  }
+
+  if (i.commandName === 'sandik') {
+    if (!yonetici.calisiyor(uid)) return i.reply('Botun çalışmıyor. Önce /baslat yaz (sandıklar sunucu başına kaydedilir).')
+    const islem = i.options.getString('islem')
+    const xyz = ['x', 'y', 'z'].map((k) => i.options.getInteger(k))
+    const verilen = xyz.filter((v) => v !== null).length
+    if (verilen !== 0 && verilen !== 3) return i.reply('Koordinat yazacaksan x, y ve z üçünü de yaz.')
+    await i.deferReply()
+    const r = await yonetici.istek(uid, 'komut', { komut: ['sandik', islem, ...(verilen ? xyz : [])].join(' ') })
+    if (r.kod !== 200) return i.editReply('Bota ulaşamadım: ' + (r.veri?.hata || r.kod))
+    return i.editReply(r.veri.cevap)
   }
 
   if (i.commandName === 'soyle') {

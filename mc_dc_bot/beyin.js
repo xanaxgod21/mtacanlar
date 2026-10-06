@@ -23,11 +23,11 @@ const TOOLS = [
   {
     name: 'gorev_baslat',
     description:
-      'Bir görev başlatır. farm: olgun ekinleri toplar ve yeniden eker. odun: ağaç bulup tamamen keser, fidan diker (ev gibi yapılara dokunmaz). tas: doğal taş kırar, cobblestone yapılara dokunmaz (kazma gerekir). Envanter doluysa görev başlamaz. Çalışan görev varsa onu bırakıp yenisine geçer.',
+      'Bir görev başlatır. farm: olgun ekinleri toplar ve yeniden eker. odun: ağacı baltayla keser, yapraklarını elle kırar, fidan diker (ev gibi yapılara dokunmaz). tas: doğal taş kırar, cobblestone yapılara dokunmaz (kazma gerekir). bosalt: topladıklarını sahibin gösterdiği sandıklara bırakır. Görevler sırasında envanter yarı dolunca sandığa kendiliğinden boşaltılır, alet kırılmak üzereyse sandıktan yenisi alınır. Çalışan görev varsa onu bırakıp yenisine geçer.',
     input_schema: {
       type: 'object',
       properties: {
-        gorev: { type: 'string', enum: ['farm', 'odun', 'tas'] },
+        gorev: { type: 'string', enum: ['farm', 'odun', 'tas', 'bosalt'] },
         dakika: {
           type: 'integer',
           description: 'Kaç dakika çalışsın. Boşsa durdurulana kadar. Otonom modda en fazla 8.',
@@ -194,7 +194,7 @@ Nasıl çalışırsın:
 - Bir oyuncu gibi düşün. Karar vermeden önce durum_bak ile envanterine, canına, açlığına ve gece/gündüze bak.
 - Görevleri araçlarla başlatırsın. Yürüme, kırma ve ekme işini oyun kodu yapar; sen neyin ne zaman yapılacağına karar verirsin.
 - Koşul uygun değilse (kazma yok, gece ve can düşük, envanter dolu) görevi başlatma. Nedenini sahibine söyle ve ne gerektiğini iste.
-- Envanter dolarsa bunu sahibine söyle ve otonom modu kapat. Sandığa koyamazsın.
+- Sahibin sandık gösterdiyse (durum_bak: sandik_sayisi) envanter yarı dolunca oraya kendin boşaltırsın. Sandık yoksa ve envanter dolarsa sahibinden "!sandik ekle" ile sandık göstermesini iste ve otonom modu kapat.
 - Yapamayacağın bir şeyi yapabiliyormuş gibi davranma, dürüstçe söyle.
 - Bir görev başarısız olursa nedenini düşün. Gelecekte işe yarayacak genel bir ders çıkarırsan ders_kaydet ile yaz.
 

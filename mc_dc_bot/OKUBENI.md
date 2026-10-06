@@ -54,6 +54,24 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
 4. Süre bitmeden 1 gün önce uyarılır. Bitince botu durur, odası kilitlenir.
    Yeni key girerse süresi kaldığı yerden uzar, oda tekrar açılır.
 
+## Oyun içi: odun, balta ve sandıklar
+
+- **Odun:** kütükleri baltayla keser, ağacın yapraklarını **elle** kırar (balta
+  yaprakta boşuna aşınmaz), düşen fidanları toplar ve diker. Sadece kestiği
+  ağacın doğal yapraklarına dokunur; uzanamadığı yapraklar kendiliğinden dökülür.
+- **Alet bakımı:** baltanın (kazmanın) 10'dan az dayanıklılığı kalınca
+  envanterdeki sağlam olanına geçer; yoksa gösterilen sandıklardan alır. Hiç
+  yoksa sohbetten haber verir ve eskisiyle devam eder. Büyülü aleti kırılmasın
+  diye kullanmaz.
+- **Sandıklar:** oyunda sandığın dibinde dur ve `!sandik ekle` yaz (ya da
+  `!sandik ekle x y z`, Discord'da `/sandik`). En fazla 10 sandık; sunucu başına
+  ayrı kaydedilir. `!sandik liste`, `!sandik sil`, `!sandik temizle`.
+- **Boşaltma:** envanter yarı dolunca (36 yuvanın 18'i) topladıklarını en yakın
+  sandıktan başlayarak bırakır ve işine geri döner. `!bosalt` ile hemen boşaltır.
+  Yanında kalanlar: sağlam en iyi 2 aleti, 16 fidan, 32 tohum, 32 iskele bloğu
+  (toprak/cobblestone), 16 yemek. Kırılmak üzere aletler (sağlamı varsa) tamir
+  için sandığa gider. Zırh, yay gibi eşyalara dokunmaz.
+
 ## Bilmen gerekenler
 
 - Botlar senin makinende çalışır. Müşteriler `localhost` veya yerel ağ

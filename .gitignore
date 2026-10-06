@@ -12,3 +12,6 @@ mc_dc_bot/deneyim.json.*
 mc_dc_bot/node_modules/
 
 mc_dc_bot/veri/
+mc_dc_bot/sandiklar.json
+mc_dc_bot/ai_kullanim.json
+mc_dc_bot/giris/

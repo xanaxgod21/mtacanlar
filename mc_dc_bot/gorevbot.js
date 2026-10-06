@@ -7,6 +7,8 @@
 //   !odun   -> yakındaki ağaçları keser
 //   !tas    -> taş kırar (kazma gerekir)
 //   !topla  -> yerdeki eşyaları toplar
+//   !bosalt -> topladıklarını belirlenen sandıklara bırakır
+//   !sandik ekle|sil|liste|temizle -> sandık göster (dibinde dur ya da x y z yaz)
 //   !otonom -> yapay zeka kendi karar verip görev seçer
 //   !gel    -> sana gelir
 //   !dur    -> mevcut görevi ve otonom modu durdurur
@@ -16,6 +18,7 @@
 const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const { Vec3 } = require('vec3')
+const fs = require('fs')
 const path = require('path')
 const ayarlar = require('./ayarlar')
 const { guvenliBaglanti } = require('./ag')
@@ -61,7 +64,7 @@ const AI_MODEL = ayarlar.aiModel
 const AI_GUNLUK_LIMIT = parseInt(process.env.AI_GUNLUK_LIMIT || '0', 10) || 0 // 0 = sınırsız
 // -----------------------------
 
-const YARDIM = 'Komutlar: !farm !odun !tas !topla !gel !dur !durum !otonom'
+const YARDIM = 'Komutlar: !farm !odun !tas !topla !bosalt !sandik !gel !dur !durum !otonom'
 
 const botSecenek = {
   host: HOST,
@@ -150,7 +153,7 @@ async function onOwnerMessage(username, message) {
 bot.on('chat', onOwnerMessage)
 bot.on('whisper', onOwnerMessage) // /msg GorevBot !odun da çalışsın
 
-const KOMUTLAR = ['!farm', '!odun', '!tas', '!topla', '!otonom', '!dur', '!durum', '!gel', '!yardim']
+const KOMUTLAR = ['!farm', '!odun', '!tas', '!topla', '!bosalt', '!sandik', '!otonom', '!dur', '!durum', '!gel', '!yardim']
 
 // Komutu çalıştırır, cevabı oyunda söyler ve geri döndürür (Discord ve ses.py
 // cevabı HTTP'den alır). Bilinmeyen komutta null döner, hiçbir şey söylemez.
@@ -161,18 +164,22 @@ function handleCommand(cmd) {
 }
 
 function komut(cmd) {
-  if (!KOMUTLAR.includes(cmd)) return null
+  const [ad, ...arg] = cmd.split(/\s+/) // "!sandik ekle 10 64 -5"
+  if (!KOMUTLAR.includes(ad)) return null
   console.log('[komut]', cmd)
   if (!hazir) return 'Henüz oyuna girmedim, biraz bekle.'
-  if (!['!durum', '!otonom', '!yardim'].includes(cmd)) otonomRun = 0
-  switch (cmd) {
+  if (!['!durum', '!otonom', '!yardim', '!sandik'].includes(ad)) otonomRun = 0
+  switch (ad) {
     case '!farm':
     case '!odun':
     case '!tas':
-    case '!topla': {
-      const ad = cmd.slice(1)
-      return baslamaEngeli(ad) || startTask(ad, GOREVLER[ad])
+    case '!topla':
+    case '!bosalt': {
+      const gorevAdi = ad.slice(1)
+      return baslamaEngeli(gorevAdi) || startTask(gorevAdi, GOREVLER[gorevAdi])
     }
+    case '!sandik':
+      return sandikKomutu(arg)
     case '!otonom':
       return setAuto(true)
     case '!dur':
@@ -250,6 +257,7 @@ function snapshot() {
     bos_slot: bot.inventory.emptySlotCount(),
     envanter,
     son_gorev_sonucu: lastResult || null,
+    sandik_sayisi: sandiklar().length,
     ai_kullanim: brain.enabled ? brain.kullanim() : null,
   }
 }
@@ -259,16 +267,28 @@ const GOREVLER = {
   odun: (id) => woodTask(id),
   tas: (id) => stoneTask(id),
   topla: (id) => collectDrops(id, 16, 30),
+  bosalt: (id) => bosaltTask(id),
+}
+
+async function bosaltTask(id) {
+  if (!sandiklar().length) return gorevNotu(id, 'Hiç sandık göstermedin: sandığın dibinde dur ve !sandik ekle yaz.')
+  if (!birakmaPlani(bot.inventory.items()).length) return gorevNotu(id, 'Sandığa bırakacak bir şeyim yok.')
+  const r = await sandikZiyareti(id, { don: false })
+  if (!r.ulasilan) gorevNotu(id, 'Sandıklara ulaşamadım.')
 }
 
 const hasPickaxe = () => bot.inventory.items().some((i) => i.name.endsWith('_pickaxe'))
 
 // Görev hiç başlamadan anlamsızsa nedenini döndürür
 function baslamaEngeli(ad) {
-  if (ad === 'tas' && !hasPickaxe()) {
-    return 'Kazmam yok, taş kıramam. Envanterime bir kazma ver.'
+  // sandık varsa oradan kazma alabilir / oraya boşaltabilir
+  const sandikVar = sandiklar().length > 0
+  if (ad === 'tas' && !hasPickaxe() && !sandikVar) {
+    return 'Kazmam yok, taş kıramam. Envanterime ya da sandığa bir kazma koy.'
   }
-  if (bot.inventory.emptySlotCount() === 0) return 'Envanterim dolu, önce boşaltmam lazım.'
+  if (ad !== 'bosalt' && bot.inventory.emptySlotCount() === 0 && !sandikVar) {
+    return 'Envanterim dolu. Boşaltmam için bir sandık göster: !sandik ekle'
+  }
   return null
 }
 
@@ -541,19 +561,358 @@ function stopTask() {
   restoreMovements()
 }
 
-// ---------- ARAÇ SEÇİMİ ----------
+// ---------- ALETLER ----------
 const MATERIALS = ['netherite', 'diamond', 'iron', 'copper', 'stone', 'golden', 'wooden']
+const ALET_TURLERI = ['axe', 'pickaxe', 'shovel', 'hoe', 'sword']
+const ALET_ADI = { axe: 'balta', pickaxe: 'kazma', shovel: 'kürek', hoe: 'çapa', sword: 'kılıç' }
+const ALET_ESIK = 10 // kalan dayanıklılık bunun altındaysa alet "kırılmak üzere"
 
-async function equipTool(kind) {
-  // listede olmayan (ör. modlu) aletler en sona
+const aletTuru = (item) => ALET_TURLERI.find((k) => item.name.endsWith('_' + k)) || null
+const kalanDayaniklilik = (item) =>
+  item.maxDurability ? item.maxDurability - (item.durabilityUsed || 0) : Infinity
+const kirilmakUzere = (item) => kalanDayaniklilik(item) < ALET_ESIK
+function buyuluMu(item) {
+  try {
+    return (item.enchants || []).length > 0
+  } catch (_) {
+    return false
+  }
+}
+
+// İyi malzeme önce; aynı malzemede dayanıklılığı çok olan önce. Listede
+// olmayan (ör. modlu) aletler en sona.
+function aletSirasi(a, b) {
   const rank = (item) => {
     const r = MATERIALS.findIndex((m) => item.name.startsWith(m + '_'))
     return r === -1 ? MATERIALS.length : r
   }
-  const tools = bot.inventory.items().filter((i) => i.name.endsWith('_' + kind))
-  tools.sort((a, b) => rank(a) - rank(b))
-  if (tools[0]) await bot.equip(tools[0], 'hand')
-  return !!tools[0]
+  return rank(a) - rank(b) || kalanDayaniklilik(b) - kalanDayaniklilik(a)
+}
+
+// İstenen türde, kırılmak üzere olmayan en iyi alet
+function iyiAlet(kind, items = bot.inventory.items()) {
+  return items.filter((i) => aletTuru(i) === kind && !kirilmakUzere(i)).sort(aletSirasi)[0] || null
+}
+
+// Aynı uyarıyı sohbete dakikada bir yağdırmasın
+const uyarilar = new Map()
+function uyar(anahtar, mesaj, ms = 10 * 60000) {
+  const t = uyarilar.get(anahtar)
+  if (t && Date.now() - t < ms) return
+  uyarilar.set(anahtar, Date.now())
+  say(mesaj)
+}
+
+const sandiktaYok = new Map() // alet türü -> sandıklarda en son bulunamadığı zaman
+
+// Aleti eline alır. Elindeki kırılmak üzereyse envanterdeki sağlamına geçer,
+// envanterde yoksa belirlenen sandıklardan alır. Hiç yoksa elle devam eder.
+// Döner: true = alet elde, false = elle (aletsiz)
+async function equipTool(kind, { sandiktan = true } = {}) {
+  const ad = ALET_ADI[kind] || kind
+  let alet = iyiAlet(kind)
+  if (
+    !alet &&
+    sandiktan &&
+    sandiklar().length &&
+    Date.now() - (sandiktaYok.get(kind) || 0) > 5 * 60000
+  ) {
+    console.log(`[alet] sağlam ${ad} yok, sandıklara bakıyorum`)
+    await sandikZiyareti(taskId, { alet: kind })
+    alet = iyiAlet(kind)
+    if (!alet) sandiktaYok.set(kind, Date.now())
+  }
+  if (!alet) {
+    const hepsi = bot.inventory.items().filter((i) => aletTuru(i) === kind).sort(aletSirasi)
+    // yedek yok: kırılmak üzere olanı kullan; büyülüyse kırılıp gitmesin diye kullanma
+    alet = hepsi.find((i) => !buyuluMu(i)) || null
+    if (alet) {
+      uyar(`alet-${kind}`, `Elimdeki ${ad} kırılmak üzere ve sağlam ${ad} bulamadım. Envanterime ya da sandığa yeni ${ad} koy.`)
+    } else if (hepsi.length) {
+      uyar(`alet-${kind}`, `Büyülü ${ad} kırılmak üzere, kırılmasın diye kullanmıyorum. Yeni ${ad} ver.`)
+    }
+  }
+  if (!alet) {
+    await eliBosalt()
+    return false
+  }
+  if (bot.heldItem?.slot !== alet.slot) await bot.equip(alet, 'hand')
+  return true
+}
+
+// "Elle" kırmak için elde alet olmasın (ör. yaprakta balta boşuna aşınmasın).
+// bot.unequip('hand') envanterde boş yer yoksa elindekini YERE ATAR; onun
+// yerine boş ya da aletsiz bir hotbar yuvasına geçeriz, hiçbir şey atılmaz.
+async function eliBosalt() {
+  const el = bot.heldItem
+  if (!el || !el.maxDurability) return // zaten aletsiz
+  const hotbar = bot.inventory.slots.slice(36, 45)
+  let i = hotbar.findIndex((it) => !it)
+  if (i === -1) i = hotbar.findIndex((it) => it && !it.maxDurability)
+  if (i !== -1) return bot.setQuickBarSlot(i)
+  const aletsiz = bot.inventory.items().find((it) => !it.maxDurability)
+  if (aletsiz) await bot.equip(aletsiz, 'hand')
+}
+
+// ---------- SANDIKLAR ----------
+// Sahibin gösterdiği sandıklar (sunucu başına ayrı): !sandik ekle / sil / liste / temizle.
+// Envanter yarı dolunca topladıklarını buraya bırakır; sağlam alet de buradan alır.
+const SANDIK_DOSYA = path.join(VERI_DIR, 'sandiklar.json')
+const SUNUCU = `${HOST}:${PORT}`
+const SANDIK_TURLERI = new Set(['chest', 'trapped_chest', 'barrel'])
+const MAX_SANDIK = 10
+const ENVANTER_YUVA = 36
+const YARI_DOLU = Math.ceil(ENVANTER_YUVA * 0.5) // bu kadar yuva dolunca sandığa boşalt
+const konumYaz = (p) => `${p.x} ${p.y} ${p.z}`
+
+let sandikKaydi = {}
+try {
+  const k = JSON.parse(fs.readFileSync(SANDIK_DOSYA, 'utf-8'))
+  if (k && typeof k === 'object' && !Array.isArray(k)) sandikKaydi = k
+} catch (_) {} // dosya yoksa sandık yok
+
+const sandiklar = () =>
+  (Array.isArray(sandikKaydi[SUNUCU]) ? sandikKaydi[SUNUCU] : []).map((p) => new Vec3(p.x, p.y, p.z))
+
+function sandiklariKaydet(liste) {
+  sandikKaydi[SUNUCU] = liste.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+  try {
+    fs.writeFileSync(SANDIK_DOSYA, JSON.stringify(sandikKaydi, null, 2), 'utf-8')
+  } catch (e) {
+    console.log('[hata] sandıklar kaydedilemedi:', e.message)
+  }
+  sandiktaYok.clear() // yeni sandıkta alet olabilir
+}
+
+// Sahibin dibindeki (5 blok) sandık; liste verilirse sadece onlardan seçer
+function sahibeEnYakinSandik(liste = null) {
+  const sahip = bot.players[OWNER]?.entity
+  if (!sahip) return null
+  const adaylar =
+    liste || bot.findBlocks({ matching: (b) => SANDIK_TURLERI.has(b.name), maxDistance: 32, count: 64 })
+  return (
+    adaylar
+      .filter((p) => p.distanceTo(sahip.position) <= 5)
+      .sort((a, b) => a.distanceTo(sahip.position) - b.distanceTo(sahip.position))[0] || null
+  )
+}
+
+function sandikKomutu([islem = 'liste', ...sayilar]) {
+  const liste = sandiklar()
+  const koordinat = () => {
+    if (sayilar.length === 0) return null
+    const [x, y, z] = sayilar.map(Number)
+    if (sayilar.length !== 3 || ![x, y, z].every(Number.isInteger)) return 'hata'
+    return new Vec3(x, y, z)
+  }
+  if (islem === 'liste') {
+    return liste.length
+      ? `Sandıklarım (${liste.length}): ${liste.map(konumYaz).join(', ')}`
+      : 'Hiç sandık göstermedin. Sandığın dibinde dur ve !sandik ekle yaz.'
+  }
+  if (islem === 'temizle') {
+    sandiklariKaydet([])
+    return 'Bütün sandıkları unuttum.'
+  }
+  if (islem === 'ekle') {
+    let p = koordinat()
+    if (p === 'hata') return 'Koordinatı şöyle yaz: !sandik ekle x y z'
+    if (!p) {
+      p = sahibeEnYakinSandik()
+      if (!p) return 'Yanında sandık göremiyorum. Sandığın dibinde dur ya da !sandik ekle x y z yaz.'
+    } else {
+      const b = bot.blockAt(p)
+      if (b && !SANDIK_TURLERI.has(b.name)) return `${konumYaz(p)} konumunda sandık yok (${b.name}).`
+    }
+    // çift sandığın diğer yarısı da aynı sandık sayılır
+    if (liste.some((q) => q.distanceTo(p) < 1.5)) return `${konumYaz(p)} zaten listemde.`
+    if (liste.length >= MAX_SANDIK) return `En fazla ${MAX_SANDIK} sandık gösterebilirsin.`
+    sandiklariKaydet([...liste, p])
+    return `Sandık eklendi: ${konumYaz(p)}. Envanterim yarı dolunca topladıklarımı buraya bırakacağım.`
+  }
+  if (islem === 'sil') {
+    let p = koordinat()
+    if (p === 'hata') return 'Koordinatı şöyle yaz: !sandik sil x y z'
+    if (!p) p = sahibeEnYakinSandik(liste)
+    const kalan = p ? liste.filter((q) => q.distanceTo(p) >= 1.5) : liste
+    if (kalan.length === liste.length) return 'Silinecek sandığı bulamadım (dibinde dur ya da koordinat yaz).'
+    sandiklariKaydet(kalan)
+    return `Sandık silindi: ${konumYaz(p)}.`
+  }
+  return 'Kullanım: !sandik ekle | sil | liste | temizle (istersen sonuna x y z)'
+}
+
+// Sandığa bırakılmayıp yanında kalanlar (işine lazım olanlar), türü başına adet
+const TOHUMLAR = new Set(['wheat_seeds', 'beetroot_seeds', 'carrot', 'potato'])
+function tutulacak(ad) {
+  if (ad.endsWith('_sapling') || ad === 'mangrove_propagule') return 16 // yeniden dikmek için
+  if (TOHUMLAR.has(ad)) return 32 // tarlayı yeniden ekmek için
+  if (SCAFFOLD.has(ad)) return 32 // yüksek kütüklere çıkmak için iskele
+  if (bot.registry.foodsByName?.[ad]) return 16
+  return 0
+}
+
+// Neyi bırakacağız: her türün fazlası. Aletlerden sağlam en iyi ikisi kalır;
+// kırılmak üzere olanlar (sağlamı varsa) tamir edilsin diye sandığa gider.
+// Alet olmayan dayanıklı eşyalara (zırh, yay, olta...) dokunulmaz.
+function birakmaPlani(items) {
+  const plan = []
+  const yigin = new Map() // ad -> { type, toplam }
+  const aletler = new Map() // tür -> [item]
+  for (const it of items) {
+    const tur = aletTuru(it)
+    if (tur) aletler.set(tur, [...(aletler.get(tur) || []), it])
+    else if (!it.maxDurability) {
+      const y = yigin.get(it.name) || { ad: it.name, type: it.type, toplam: 0 }
+      y.toplam += it.count
+      yigin.set(it.name, y)
+    }
+  }
+  for (const y of yigin.values()) {
+    const fazla = y.toplam - tutulacak(y.ad)
+    if (fazla > 0) plan.push({ ad: y.ad, type: y.type, adet: fazla })
+  }
+  for (const liste of aletler.values()) {
+    const saglam = liste.filter((i) => !kirilmakUzere(i)).sort(aletSirasi)
+    for (const i of saglam.slice(2)) plan.push({ ad: i.name, slot: i.slot, adet: 1 })
+    if (saglam.length) for (const i of liste.filter(kirilmakUzere)) plan.push({ ad: i.name, slot: i.slot, adet: 1 })
+  }
+  return plan
+}
+
+// Belli bir yuvadaki eşyayı (ör. tam o balta) taşır: tıkla al, boş yuvaya bırak
+async function slotTasi(pencere, kaynak, bas, son) {
+  const hedef = pencere.firstEmptySlotRange(bas, son)
+  if (hedef === null) throw new Error('hedef dolu')
+  await bot.clickWindow(kaynak, 0, 0)
+  await bot.clickWindow(hedef, 0, 0)
+}
+
+async function sandigaBirak(pencere) {
+  let birakilan = 0
+  for (const p of birakmaPlani(pencere.items())) {
+    try {
+      if (p.slot != null) await slotTasi(pencere, p.slot, 0, pencere.inventoryStart)
+      else await pencere.deposit(p.type, null, p.adet)
+      birakilan += p.adet
+    } catch (e) {
+      if (/full|dolu/i.test(e.message)) return { birakilan, dolu: true }
+      console.log(`[sandık] ${p.ad} bırakılamadı: ${e.message}`)
+    }
+  }
+  return { birakilan, dolu: false }
+}
+
+function sureli(soz, ms, mesaj) {
+  let t
+  return Promise.race([
+    soz,
+    new Promise((_, reddet) => (t = setTimeout(() => reddet(new Error(mesaj)), ms))),
+  ]).finally(() => clearTimeout(t))
+}
+
+let sandikta = false // aynı anda iki sandık ziyareti olmasın
+
+// Belirlenen sandıklara (yakından uzağa) gider: fazlaları bırakır, istenirse
+// sağlam alet alır, sonra işin olduğu yere döner.
+async function sandikZiyareti(id, { alet = null, don = true } = {}) {
+  const sonuc = { birakilan: 0, alindi: false, ulasilan: 0, dolu: 0 }
+  if (sandikta || !hazir) return sonuc
+  sandikta = true
+  const donus = bot.entity.position.clone()
+  try {
+    const sirali = sandiklar().sort(
+      (a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position)
+    )
+    for (const pos of sirali) {
+      if (id !== taskId) break
+      const aletLazim = alet && !iyiAlet(alet)
+      if (!aletLazim && birakmaPlani(bot.inventory.items()).length === 0) break
+      try {
+        await gotoTimeout(new goals.GoalGetToBlock(pos.x, pos.y, pos.z), 60000)
+      } catch (_) {
+        console.log(`[sandık] ${konumYaz(pos)} sandığına gidemedim`)
+        continue
+      }
+      if (id !== taskId) break
+      const blok = bot.blockAt(pos)
+      if (!blok || !SANDIK_TURLERI.has(blok.name)) {
+        console.log(`[sandık] ${konumYaz(pos)} konumunda sandık yok`)
+        continue
+      }
+      let pencere
+      try {
+        pencere = await sureli(bot.openContainer(blok), 8000, 'sandık açılmadı')
+      } catch (e) {
+        console.log(`[sandık] ${konumYaz(pos)} açılamadı: ${e.message}`)
+        if (bot.currentWindow) bot.closeWindow(bot.currentWindow)
+        continue
+      }
+      sonuc.ulasilan++
+      try {
+        const b = await sandigaBirak(pencere)
+        sonuc.birakilan += b.birakilan
+        if (b.dolu) {
+          sonuc.dolu++
+          console.log(`[sandık] ${konumYaz(pos)} doldu`)
+        }
+        if (aletLazim) {
+          const bulunan = iyiAlet(alet, pencere.containerItems())
+          if (bulunan) {
+            await slotTasi(pencere, bulunan.slot, pencere.inventoryStart, pencere.inventoryEnd)
+            sonuc.alindi = true
+            console.log(`[alet] sandıktan ${bulunan.name} aldım (${kalanDayaniklilik(bulunan)} dayanıklılık)`)
+            // sağlamı geldi: kırılmak üzere olan eskisi tamir için hemen buraya kalsın
+            sonuc.birakilan += (await sandigaBirak(pencere)).birakilan
+          }
+        }
+      } catch (e) {
+        console.log(`[sandık] hata: ${e.message}`)
+      } finally {
+        try {
+          pencere.close()
+        } catch (_) {}
+      }
+    }
+  } finally {
+    sandikta = false
+  }
+  if (sonuc.birakilan) say(`Sandığa ${sonuc.birakilan} eşya bıraktım.`)
+  if (sonuc.dolu && sonuc.dolu === sonuc.ulasilan) {
+    uyar('sandik-dolu', 'Sandıklarım doldu, yeni sandık göster (!sandik ekle).')
+  }
+  // işin olduğu yere dön
+  if (don && id === taskId && bot.entity.position.distanceTo(donus) > 3) {
+    await gotoTimeout(new goals.GoalNear(donus.x, donus.y, donus.z, 2), 60000).catch(() => {})
+  }
+  return sonuc
+}
+
+let bosaltmaEsigi = YARI_DOLU
+const doluYuva = () => ENVANTER_YUVA - bot.inventory.emptySlotCount()
+
+// Envanter yarı dolduysa sandıklara boşaltır (görev döngülerinin başında)
+async function gerekirseBosalt(id) {
+  if (doluYuva() < bosaltmaEsigi) return
+  if (!sandiklar().length) {
+    uyar(
+      'sandik-yok',
+      'Envanterim yarı doldu. Sandık gösterirsen (dibinde dur, !sandik ekle) oraya boşaltırım, yoksa dolunca dururum.',
+      30 * 60000
+    )
+    return
+  }
+  await sandikZiyareti(id)
+  // yanımda kalması gerekenler yüzünden hâlâ yarıdan fazlaysa her turda sandığa gitmesin
+  bosaltmaEsigi = Math.max(YARI_DOLU, doluYuva() + 6)
+}
+
+// Envanter tamamen doluysa sandığa boşaltmayı dener. Yer açılmazsa nedeni döner.
+async function yerAc(id) {
+  if (bot.inventory.emptySlotCount() > 0) return null
+  if (!sandiklar().length) return 'Envanterim doldu, duruyorum. (Sandık gösterirsen oraya boşaltırım: !sandik ekle)'
+  await sandikZiyareti(id)
+  return bot.inventory.emptySlotCount() > 0 ? null : 'Envanterim de sandıklarım da doldu, duruyorum.'
 }
 
 // ---------- YERDEKİ EŞYALARI TOPLA ----------
@@ -593,10 +952,9 @@ async function gatherTask(id, { matchFn, toolKind, aletYok, label, maxCount = 20
   let count = 0
 
   while (calisiyor(id) && count < maxCount) {
-    if (bot.inventory.emptySlotCount() === 0) {
-      gorevNotu(id, 'Envanterim doldu, duruyorum.')
-      return
-    }
+    const dolu = await yerAc(id)
+    if (dolu) return gorevNotu(id, dolu)
+    await gerekirseBosalt(id)
 
     const positions = bot
       .findBlocks({
@@ -650,7 +1008,7 @@ const SCAFFOLD = new Set(['dirt', 'cobblestone', 'netherrack'])
 const placed = new Map() // "x,y,z" -> Vec3
 let normalMovements = null
 let woodMovements = null   // odun görevinde kullanılır: yoldaki yaprakları kırmaz
-const CLEAN_LEAVES = false // true yaparsan ağaç bitince yaprakları da kırar
+const CLEAN_LEAVES = true // ağaç bitince yapraklarını elle kırar (false: dokunmaz, kendileri dökülür)
 
 // Hangi görev çalışıyorsa onun hareket ayarına dön
 function restoreMovements() {
@@ -685,7 +1043,7 @@ async function cleanBelow(id) {
     const below = bot.blockAt(bot.entity.position.offset(0, -0.5, 0))
     if (!below || !placed.has(key(below.position)) || !SCAFFOLD.has(below.name)) break
     try {
-      await equipTool('shovel')
+      await equipTool('shovel', { sandiktan: false }) // kürek yoksa elle
       await kaz(below)
     } catch (_) {
       break
@@ -711,7 +1069,7 @@ async function cleanLeftovers(id) {
       try {
         await bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, 3))
         if (bot.canDigBlock(b)) {
-          await equipTool('shovel')
+          await equipTool('shovel', { sandiktan: false })
           await kaz(b)
           n++
         }
@@ -724,16 +1082,23 @@ async function cleanLeftovers(id) {
   await collectDrops(id)
 }
 
-// Yaprakları kır (ulaşabildiği kadar); fidan, elma, çubuk yere düşer ve toplanır
-async function cleanLeaves(id) {
+// Kesilen ağacın yapraklarını ELLE kırar (balta yaprakta boşuna aşınmasın).
+// Fidan, elma, çubuk düşer ve toplanır. Sadece bu ağacın doğal yaprakları:
+// oyuncunun koyduğu yapraklara (çit, süs) ve yandaki ağaçlara dokunmaz.
+// Uzanamadığı yüksek yapraklar kendiliğinden dökülür.
+async function cleanLeaves(id, kutukler) {
+  if (!kutukler || !kutukler.length) return
+  const yakin = (p) => kutukler.some((k) => k.distanceTo(p) <= 4.5)
+  const dogalYaprak = (b) => isLeaves(b) && String(b.getProperties().persistent) !== 'true'
   const skipped = new Set()
+  const sonZaman = Date.now() + 60000 // bir ağacın yapraklarına en fazla 1 dakika
   let n = 0
   bot.pathfinder.setMovements(cleanMovements())
   try {
-    while (id === taskId && n < 60) {
+    while (id === taskId && n < 60 && Date.now() < sonZaman) {
       const leaves = bot
-        .findBlocks({ matching: isLeaves, maxDistance: 8, count: 20 })
-        .filter((p) => !skipped.has(key(p)))
+        .findBlocks({ matching: dogalYaprak, maxDistance: 12, count: 150 })
+        .filter((p) => !skipped.has(key(p)) && yakin(p))
       if (leaves.length === 0) break
       leaves.sort(
         (a, b) =>
@@ -741,9 +1106,13 @@ async function cleanLeaves(id) {
       )
       const pos = leaves[0]
       try {
-        await bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, 3))
+        // uzanabiliyorsa yürümeden kır
+        if (!bot.canDigBlock(bot.blockAt(pos))) {
+          await gotoTimeout(new goals.GoalNear(pos.x, pos.y, pos.z, 3), 10000)
+        }
         const b = bot.blockAt(pos)
-        if (b && isLeaves(b) && bot.canDigBlock(b)) {
+        if (b && dogalYaprak(b) && bot.canDigBlock(b)) {
+          await eliBosalt()
           await kaz(b)
           n++
         } else {
@@ -756,14 +1125,14 @@ async function cleanLeaves(id) {
   } finally {
     restoreMovements()
   }
-  if (n > 0) console.log(`[temizlik] ${n} yaprak kırıldı`)
+  if (n > 0) console.log(`[temizlik] ${n} yaprak elle kırıldı`)
   await collectDrops(id, 12, 30) // fidan, elma, çubuk
 }
 
-// Ağaç bitince (yakında kütük kalmayınca) temizle
-async function treeCleanup(id) {
+// Ağaç bitince temizle
+async function treeCleanup(id, kutukler) {
   await cleanBelow(id)
-  if (CLEAN_LEAVES) await cleanLeaves(id)
+  if (CLEAN_LEAVES) await cleanLeaves(id, kutukler)
   await collectDrops(id, 14, 12) // kütük, fidan, elma, çubuk
   await plantSaplings(id)
 }
@@ -1035,10 +1404,13 @@ async function woodTask(id) {
 
   while (calisiyor(id)) {
     try {
-      if (bot.inventory.emptySlotCount() === 0) {
-        gorevNotu(id, 'Envanterim doldu, duruyorum.')
+      const dolu = await yerAc(id)
+      if (dolu) {
+        gorevNotu(id, dolu)
         break
       }
+      await gerekirseBosalt(id)
+      if (!calisiyor(id)) break
 
       markVisited()
       await collectDrops(id, 14, 12) // düşen fidan, elma, çubuk vb. otomatik topla
@@ -1080,7 +1452,7 @@ async function woodTask(id) {
         count += cut
         console.log(`[odun] ağaç kesildi (${cut} kütük, toplam ${count})`)
         await collectDrops(id)
-        await treeCleanup(id)
+        await treeCleanup(id, tree.logs)
       } else {
         console.log(
           `[odun] ağaca ulaşamadım (${tree.logs.length} kütük, hiçbiri kesilemedi). Bota blok (dirt) verirsen yükselip ulaşabilir.`
@@ -1104,7 +1476,6 @@ async function woodTask(id) {
     try {
       await cleanBelow(id)
       await cleanLeftovers(id)
-      if (CLEAN_LEAVES) await cleanLeaves(id)
       await collectDrops(id, 14, 12)
       await plantSaplings(id)
     } catch (e) {
@@ -1165,10 +1536,9 @@ async function farmTask(id) {
     .map((b) => b.id)
 
   while (calisiyor(id)) {
-    if (bot.inventory.emptySlotCount() === 0) {
-      gorevNotu(id, 'Envanterim doldu, duruyorum.')
-      return
-    }
+    const dolu = await yerAc(id)
+    if (dolu) return gorevNotu(id, dolu)
+    await gerekirseBosalt(id)
 
     const positions = bot
       .findBlocks({
