@@ -11,7 +11,11 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 
-const GUN = 24 * 60 * 60 * 1000
+const SAAT = 60 * 60 * 1000
+const GUN = 24 * SAAT
+
+// Keyin süresi (ms, 0 = süresiz). Eski keylerde süre "gun" alanında durur.
+const keySuresi = (k) => (k.sure !== undefined ? k.sure : (k.gun || 0) * GUN)
 // Birbirine benzeyen harfler yok (0/O, 1/I/L): müşteri elle yazarken karıştırmasın
 const ALFABE = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
 
@@ -89,8 +93,10 @@ class LisansDeposu {
   }
 
   // ---------- Keyler ----------
-  // gun = 0 ise süresiz. Açık keyleri döndürür (bir daha gösterilemez).
-  olustur({ gun = 30, adet = 1, ai = true, simdi = Date.now() } = {}) {
+  // sure: milisaniye (0 = süresiz); eski kullanım için gun de olur.
+  // Açık keyleri döndürür (bir daha gösterilemez).
+  olustur({ sure, gun, adet = 1, ai = true, direkt = false, simdi = Date.now() } = {}) {
+    if (sure === undefined) sure = (gun ?? 30) * GUN
     const yeni = []
     for (let i = 0; i < adet; i++) {
       let key
@@ -99,7 +105,8 @@ class LisansDeposu {
       this.veri.keyler.push({
         hash: ozet(key),
         onek: key.slice(0, 10), // "YAREN-AB12": listede tanımak için
-        gun,
+        sure,
+        direkt, // satıcı /key-ver ile doğrudan verdi
         ai: !!ai,
         olusturma: simdi,
         durum: 'bos', // bos | kullanildi | iptal
@@ -168,6 +175,7 @@ class LisansDeposu {
       return { tip: 'yasakli', mesaj: 'Lisansın satıcı tarafından iptal edilmiş, onunla görüş.' }
     }
 
+    const sure = keySuresi(k)
     // Keyi hemen "kullanıldı" yap: iki kere hızlı basılırsa ikinci kez kullanılmasın
     k.durum = 'kullanildi'
     k.kullanan = userId
@@ -182,15 +190,17 @@ class LisansDeposu {
         kullaniciAdi,
         kanalId: null,
         durum: 'aktif',
-        bitis: k.gun > 0 ? simdi + k.gun * GUN : null,
+        bitis: sure > 0 ? simdi + sure : null,
         ai: k.ai,
-        aiBitis: k.ai && k.gun > 0 ? simdi + k.gun * GUN : k.ai ? null : 0,
+        aiBitis: k.ai && sure > 0 ? simdi + sure : k.ai ? null : 0,
         aiBittiBildirildi: false,
         olusturma: simdi,
         keyler: [k.onek],
         son: null, // son /baslat ayarları
         calisiyordu: false, // bot kapanınca (yeniden başlatma) otomatik açılsın mı
-        uyarildi: k.gun > 0 && k.gun <= 1, // "süren yarın doluyor" (1 günlük denemede hemen uyarma)
+        // "süren yarın / 1 saat sonra doluyor" (kısa denemelerde hemen uyarma)
+        uyarildi: sure > 0 && sure <= GUN,
+        saatUyarildi: sure > 0 && sure <= SAAT,
       }
       this.veri.lisanslar[userId] = l
     } else {
@@ -198,21 +208,22 @@ class LisansDeposu {
       // yapay zeka durumu lisans süresi değişmeden önce okunur
       const aiAcik = this.aiAktifMi(l, simdi)
       const eskiAiBitis = l.aiBitis === undefined ? l.bitis : l.aiBitis
-      if (k.gun === 0) l.bitis = null
+      if (sure === 0) l.bitis = null
       else if (l.bitis !== null || tip === 'yeniden') {
         const taban = tip === 'uzatildi' && l.bitis !== null ? l.bitis : simdi
-        l.bitis = taban + k.gun * GUN
+        l.bitis = taban + sure
       }
       if (k.ai) {
-        if (k.gun === 0) l.aiBitis = null
-        else if (!aiAcik) l.aiBitis = simdi + k.gun * GUN
-        else l.aiBitis = eskiAiBitis === null ? null : eskiAiBitis + k.gun * GUN
+        if (sure === 0) l.aiBitis = null
+        else if (!aiAcik) l.aiBitis = simdi + sure
+        else l.aiBitis = eskiAiBitis === null ? null : eskiAiBitis + sure
         l.ai = true
         l.aiBittiBildirildi = false
       }
       l.durum = 'aktif'
       l.kullaniciAdi = kullaniciAdi
       l.uyarildi = l.bitis !== null && l.bitis - simdi <= GUN
+      l.saatUyarildi = l.bitis !== null && l.bitis - simdi <= SAAT
       l.keyler.push(k.onek)
     }
     this.kaydet()
@@ -235,27 +246,29 @@ class LisansDeposu {
     return l
   }
 
-  uzat(userId, gun, simdi = Date.now()) {
+  // sure: milisaniye (0 = süresiz yap)
+  uzat(userId, sure, simdi = Date.now()) {
     const l = this.bul(userId)
     if (!l) return null
     // önceki durumu değiştirmeden önce oku
     const aiAcik = this.aiAktifMi(l, simdi)
     const eskiAi = l.aiBitis === undefined ? l.bitis : l.aiBitis
-    if (gun === 0) l.bitis = null
+    if (sure === 0) l.bitis = null
     else if (l.bitis !== null || !this.aktifMi(l, simdi)) {
-      // süresiz lisans süresiz kalır; süreli olana (ya da kapanmış olana) gün eklenir
-      l.bitis = Math.max(l.bitis ?? simdi, simdi) + gun * GUN
+      // süresiz lisans süresiz kalır; süreli olana (ya da kapanmış olana) süre eklenir
+      l.bitis = Math.max(l.bitis ?? simdi, simdi) + sure
     }
     // Yapay zeka sadece şu an açıksa uzar (süresi bitmiş yapay zeka geri gelmez,
     // "süresiz yap" yapay zekayı süresiz yapmaz: parasını sen ödersin)
-    if (l.ai && aiAcik && gun > 0 && eskiAi !== null) {
-      l.aiBitis = Math.max(eskiAi, simdi) + gun * GUN
+    if (l.ai && aiAcik && sure > 0 && eskiAi !== null) {
+      l.aiBitis = Math.max(eskiAi, simdi) + sure
     } else if (l.aiBitis === undefined) {
       l.aiBitis = eskiAi // eski kayıt: yapay zeka lisansa bağlı kalmasın
     }
     l.durum = 'aktif'
     l.aiBittiBildirildi = !this.aiAktifMi(l, simdi) && l.aiBittiBildirildi
     l.uyarildi = l.bitis !== null && l.bitis - simdi <= GUN
+    l.saatUyarildi = l.bitis !== null && l.bitis - simdi <= SAAT
     this.kaydet()
     return l
   }
@@ -268,7 +281,8 @@ class LisansDeposu {
   // lisansı sürerken yapay zeka süresi dolanlar
   zamanKontrol(simdi = Date.now()) {
     const dolan = []
-    const yaklasan = []
+    const yaklasan = [] // 1 günden az kaldı
+    const sonSaat = [] // 1 saatten az kaldı
     const aiDolan = []
     for (const l of Object.values(this.veri.lisanslar)) {
       if (l.durum !== 'aktif') continue
@@ -281,13 +295,17 @@ class LisansDeposu {
         l.durum = 'bitti'
         l.calisiyordu = false
         dolan.push(l)
+      } else if (!l.saatUyarildi && l.bitis - simdi < SAAT) {
+        l.saatUyarildi = true
+        l.uyarildi = true
+        sonSaat.push(l)
       } else if (!l.uyarildi && l.bitis - simdi < GUN) {
         l.uyarildi = true
         yaklasan.push(l)
       }
     }
-    if (dolan.length || yaklasan.length || aiDolan.length) this.kaydet()
-    return { dolan, yaklasan, aiDolan }
+    if (dolan.length || yaklasan.length || sonSaat.length || aiDolan.length) this.kaydet()
+    return { dolan, yaklasan, sonSaat, aiDolan }
   }
 
   ozetListe() {
@@ -307,4 +325,15 @@ function bitisYazi(l) {
   })
 }
 
-module.exports = { LisansDeposu, keyUret, temizle, ozet, bitisYazi, GUN }
+// "3 gün", "12 saat", "2 hafta", "süresiz"
+function sureYazi(ms) {
+  if (!ms) return 'süresiz'
+  const gun = ms / GUN
+  if (gun >= 30 && gun % 30 === 0) return `${gun / 30} ay`
+  if (gun >= 7 && gun % 7 === 0) return `${gun / 7} hafta`
+  if (Number.isInteger(gun)) return `${gun} gün`
+  const saat = Math.round(ms / SAAT)
+  return saat >= 24 ? `${Math.floor(saat / 24)} gün ${saat % 24} saat` : `${saat} saat`
+}
+
+module.exports = { LisansDeposu, keyUret, temizle, ozet, bitisYazi, sureYazi, keySuresi, GUN, SAAT }

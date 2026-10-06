@@ -3,6 +3,8 @@
   "guild_id": "1062443427964399687",
   "log_kanal_id": "1556774227191922848",
   "discord_sahip_id": "561571565527891985",
+  "yetkili_rol_id": "",
+  "oda_silme_saat": 0,
   "musteri_kategori_id": "",
   "max_bot": 20,
   "ai_gunluk_limit": 200,

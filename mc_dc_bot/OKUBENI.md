@@ -15,6 +15,11 @@ oradan yönetir. Her müşterinin botu senin makinende ayrı çalışır.
    - `guild_id`: satış yaptığın Discord sunucusu
    - `log_kanal_id`: satışların, başlatmaların ve hataların düşeceği kanal (sadece sen gör)
    - `discord_sahip_id`: senin Discord ID'n (key üretir, her odayı görürsün)
+   - `yetkili_rol_id`: ekibin varsa bu roldekiler de key verip lisans yönetebilir
+     (boş = sadece sen). Komutları görmeleri için: Sunucu Ayarları > Entegrasyonlar >
+     bot > komutlara bu rolü ekle.
+   - `oda_silme_saat`: süre bitince müşterinin odası kaç saat sonra silinsin
+     (0 = hemen silinir; örneğin 24 yazarsan oda 1 gün kilitli bekler, sonra silinir)
    - `anthropic_api_key`: yapay zeka için (boşsa yapay zeka kapalı)
    - `max_bot`: aynı anda en fazla kaç müşteri botu çalışsın. Her bot yaklaşık
      150 MB RAM yer, 20 bot için en az 4 GB RAM'li bir VPS al.
@@ -43,16 +48,20 @@ klasörüne dokunma (bütün müşteriler orada).
 bütün müşterilerin: **yedeğini al**. Keyler orada sadece özet olarak durur;
 bir key sadece üretildiği an bir kere gösterilir.
 
-## Satıcı komutları (sadece sen)
+## Satıcı (ve yetkili) komutları
+
+Süreyi `birim` (saat / gün / hafta / ay / süresiz) ve `miktar` ile seçersin.
+**Süre, müşteri keyi girdiği an başlar**; key beklerken süre yanmaz.
 
 | Komut | Ne yapar |
 |---|---|
-| `/key-olustur gun:30 adet:5 ai:true` | Key üretir (`gun:0` = süresiz, `ai:false` = yapay zekasız) |
-| `/key-liste` | Boşta / kullanılmış / iptal keyler |
+| `/key-olustur birim:gün miktar:30 adet:5 ai:true` | Key üretir, sana gösterir (bir kez). `ai:false` = yapay zekasız |
+| `/key-ver kullanici:@ali birim:hafta miktar:2` | Key üretip Ali'ye **DM ile gönderir**. Ali keyi girince odası açılır. DM'i kapalıysa key sana gösterilir |
+| `/key-liste` | Boşta / kullanılmış / iptal keyler ve süreleri |
 | `/key-iptal key:YAREN-XXXX` | Satılmamış bir keyi iptal eder |
-| `/lisanslar` | Müşteriler, bitiş tarihleri, çalışan botlar |
-| `/lisans-uzat kullanici:@ali gun:7` | Süre ekler (`gun:0` = süresiz yapar) |
-| `/lisans-iptal kullanici:@ali` | Botunu durdurur, odasını kilitler, yeni key giremez |
+| `/lisanslar` | Müşteriler, kalan süreleri (geri sayımlı), çalışan botlar |
+| `/lisans-uzat kullanici:@ali birim:gün miktar:7` | Süre ekler; süresi bitip odası silindiyse odası geri açılır |
+| `/lisans-iptal kullanici:@ali` | Botunu durdurur, odasını siler, key giremez |
 | `/panel-kur` | Bulunduğun kanala satış panelini koyar |
 
 Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
@@ -63,8 +72,11 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
 2. Odasında: `/baslat host:oyna.sunucu.com sahip:OyunAdı` (sonraki seferlerde
    sadece `/baslat`). `sahip`: botun oyunda sadece onun komutlarını dinlemesi için.
 3. `/gorev` `/durum` `/soyle` `/durdur` odada; `/bilgi` ve `/odam` her yerde.
-4. Süre bitmeden 1 gün önce uyarılır. Bitince botu durur, odası kilitlenir.
-   Yeni key girerse süresi kaldığı yerden uzar, oda tekrar açılır.
+4. Kalan süreyi odada, `/bilgi`'de ve oda başlığında görür (geri sayım). Bitişe
+   1 gün ve 1 saat kala uyarılır.
+5. Süre bitince botu durur, **odası silinir** ve DM ile haber verilir. Yeni key
+   girerse odası yeniden açılır; botunun ayarları, sandıkları, deneyimleri kaybolmaz.
+   Süresi bitmeden yeni key girerse süre kalan sürenin üstüne eklenir.
 
 ## Oyun içi: odun, balta ve sandıklar
 
@@ -91,8 +103,8 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
 - Bot düşerse (sunucu kapandı, atıldı) 30 sn arayla 3 kez tekrar bağlanır.
 - Yapay zekanın kendi süresi vardır: sadece `ai:true` keyler onu uzatır.
   Süresi dolunca bot yapay zekasız devam eder.
-- Süresi dolalı / iptal edileli 14 gün olan müşterilerin odaları silinir
-  (Discord sunucusu en fazla 500 kanal alır). Yeni key girerlerse oda geri gelir.
+- Süresi biten ve iptal edilen müşterilerin odaları silinir (`oda_silme_saat`).
+  Discord sunucusu en fazla 500 kanal alır; bu sayede dolmaz.
 - Her müşteri botu en fazla 384 MB bellek kullanabilir; aşan sadece kendisi kapanır.
 - Hataların tam dökümü ve yapay zeka faturası hataları sadece senin log
   kanalına düşer, müşteri görmez.

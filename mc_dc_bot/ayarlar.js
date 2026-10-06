@@ -47,6 +47,8 @@ module.exports = {
   guildId: al('GUILD_ID', 'guild_id'),
   logKanalId: al('LOG_CHANNEL_ID', 'log_kanal_id'), // satıcı logu (satışlar, hatalar)
   discordSahipId: al('DISCORD_OWNER_ID', 'discord_sahip_id'), // satıcı (admin)
+  yetkiliRolId: al('YETKILI_ROL_ID', 'yetkili_rol_id'), // bu roldekiler de key verebilir (boş = sadece sen)
+  odaSilmeSaat: sayi('ODA_SILME_SAAT', 'oda_silme_saat', 0), // süre bitince oda kaç saat sonra silinsin (0 = hemen)
   musteriKategoriId: al('MUSTERI_KATEGORI_ID', 'musteri_kategori_id'), // boşsa bot açar
   maxBot: sayi('MAX_BOT', 'max_bot', 20), // aynı anda en fazla kaç müşteri botu
   aiGunlukLimit: sayi('AI_GUNLUK_LIMIT', 'ai_gunluk_limit', 200), // müşteri başı, 0 = sınırsız
