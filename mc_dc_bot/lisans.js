@@ -277,6 +277,20 @@ class LisansDeposu {
     return this.guncelle(userId, { durum: 'iptal', calisiyordu: false, iptalZamani: simdi })
   }
 
+  // Süreyi şimdi bitirir. İptalden farkı: kişi yeni key girip devam edebilir.
+  bitir(userId, simdi = Date.now()) {
+    const l = this.bul(userId)
+    if (!l) return null
+    l.durum = 'bitti'
+    l.bitis = simdi
+    l.calisiyordu = false
+    // süresiz yapay zeka da biter; yeni AI'sız keyle geri gelmesin
+    const ai = l.aiBitis === undefined ? null : l.aiBitis
+    if (ai === null || ai > simdi) l.aiBitis = simdi
+    this.kaydet()
+    return l
+  }
+
   // Süresi yeni dolanlar (durumları "bitti" yapılır), yarın dolacaklar ve
   // lisansı sürerken yapay zeka süresi dolanlar
   zamanKontrol(simdi = Date.now()) {

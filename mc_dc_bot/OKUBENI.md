@@ -1,8 +1,11 @@
 # MC DC BOT (Yaren) — satış sürümü
 
-Minecraft'ta odun kesen, taş kıran, tarla toplayan bir NPC (Yaren). Sen key
-satarsın, müşteri keyi Discord'da girer, ona özel bir oda açılır ve botunu
-oradan yönetir. Her müşterinin botu senin makinende ayrı çalışır.
+Minecraft'ta odun kesen, taş kıran, tarla toplayan bir NPC (Yaren). Sen
+**yönetim panelinden** süresini seçip key verirsin; müşteri keyini **key
+kanalına** yazar, bot kontrol eder: doğruysa ona özel bir oda açar, yanlışsa
+hata verir. Müşteri botunu o odadan yönetir. Süreler panelde canlı görünür,
+süre bitince oda kendiliğinden silinir. Her müşterinin botu senin makinende
+ayrı çalışır.
 
 ## Kurulum (satıcı, Windows)
 
@@ -31,11 +34,20 @@ oradan yönetir. Her müşterinin botu senin makinende ayrı çalışır.
    `Administrator` iznini seç, çıkan linki aç. Yönetici vermek istemezsen en az:
    Kanalları Gör, Mesaj Gönder, Mesaj Geçmişini Oku, Bağlantı Yerleştir, Tepki
    Ekle, Uygulama Komutlarını Kullan, Thread'lerde Mesaj Gönder, Thread Oluştur,
-   Kanalları Yönet, Rolleri Yönet. Bot açılınca eksik izin varsa log kanalına yazar.
+   Kanalları Yönet, Rolleri Yönet, **Mesajları Yönet** (key kanalına yazılan keyleri
+   silmek için). Bot açılınca eksik izin varsa log kanalına yazar.
+   Ayrıca Developer Portal > uygulaman > **Bot** sayfasında **Message Content
+   Intent**i aç ve kaydet: müşteri keyini kanala yazarak girebilsin diye. Kapalıysa
+   sadece "Key Gir" butonu çalışır (bot açılırken bunu kendisi anlar).
 5. **`baslat.bat`** ile başlat (kapanırsa 10 sn sonra kendisi yeniden açılır).
    Bilgisayar/VPS kapanınca botlar da kapanır; açınca çalışan müşteri botları
    kendiliğinden geri gelir.
-6. Müşterilerin göreceği bir kanalda `/panel-kur` yaz: "Key Gir" butonlu panel.
+6. Müşterilerin göreceği bir kanal aç (örneğin `#key-gir`) ve orada `/panel-kur`
+   yaz. Burası **key kanalı** olur: müşteri keyini buraya yazar (mesajı hemen
+   silinir, kimse görmez) ya da "Key Gir" butonuna basar.
+7. Kendi kanalında `/yonetim-kur` yaz: **yönetim paneli** kurulur. Herkese açık bir
+   kanalda yazarsan bot sana (ve yetkililere) özel `#yaren-yonetim` kanalını açıp
+   paneli oraya koyar.
 
 Linux VPS'te: `npm install`, `cp ayarlar.ornek.json ayarlar.json`, `nano ayarlar.json`,
 sonra sürekli çalışsın ve VPS yeniden açılınca kendiliğinden başlasın diye:
@@ -48,10 +60,29 @@ klasörüne dokunma (bütün müşteriler orada).
 bütün müşterilerin: **yedeğini al**. Keyler orada sadece özet olarak durur;
 bir key sadece üretildiği an bir kere gösterilir.
 
+## Yönetim paneli
+
+`/yonetim-kur` ile kurulan paneldeki tablo bütün aktif müşterileri ve **kalan
+sürelerini** gösterir (Discord geri sayar, en önce biten en üstte, 🟢 = botu
+çalışıyor). Biri key girince, süre uzayınca/bitince tablo kendiliğinden
+güncellenir. Butonlar (sadece sen ve yetkili rolü basabilir):
+
+| Buton | Ne yapar |
+|---|---|
+| 🎁 **Key Ver** | Kişiyi, süreyi (saat/gün/hafta/ay/süresiz) ve yapay zekayı seçersin; key ona **DM ile gider**. DM'i kapalıysa key sana gösterilir |
+| 🔑 **Key Oluştur** | Süreyi ve kaç tane olduğunu seçersin, keyler sana gösterilir (bir kez), kendin dağıtırsın |
+| ⏩ **Süre Uzat** | Kişiye süre ekler; süresi bitip odası silindiyse odası geri açılır |
+| ⛔ **Lisans Bitir** | "Süresini şimdi bitir" (yeni key alırsa devam eder) ya da "İptal et" (bir daha key giremez). Onay sorar; botu durur, odası silinir, kişiye DM gider |
+| 🔍 **Kişi Sorgula** | Bir kişinin bitişi, yapay zekası, botu, odası, kullandığı keyler |
+| 📋 **Lisanslar** / 🗝️ **Keyler** | Bütün müşteriler / bütün keyler (boşta, kullanılmış, iptal) |
+| 🗑️ **Key İptal** | Henüz kullanılmamış bir keyi iptal eder |
+| 🔄 **Yenile** | Tabloyu hemen günceller |
+
 ## Satıcı (ve yetkili) komutları
 
-Süreyi `birim` (saat / gün / hafta / ay / süresiz) ve `miktar` ile seçersin.
-**Süre, müşteri keyi girdiği an başlar**; key beklerken süre yanmaz.
+Panelin yaptığı her şey komutla da yapılır. Süreyi `birim` (saat / gün / hafta /
+ay / süresiz) ve `miktar` ile seçersin. **Süre, müşteri keyi girdiği an
+başlar**; key beklerken süre yanmaz.
 
 | Komut | Ne yapar |
 |---|---|
@@ -61,14 +92,20 @@ Süreyi `birim` (saat / gün / hafta / ay / süresiz) ve `miktar` ile seçersin.
 | `/key-iptal key:YAREN-XXXX` | Satılmamış bir keyi iptal eder |
 | `/lisanslar` | Müşteriler, kalan süreleri (geri sayımlı), çalışan botlar |
 | `/lisans-uzat kullanici:@ali birim:gün miktar:7` | Süre ekler; süresi bitip odası silindiyse odası geri açılır |
-| `/lisans-iptal kullanici:@ali` | Botunu durdurur, odasını siler, key giremez |
-| `/panel-kur` | Bulunduğun kanala satış panelini koyar |
+| `/lisans-bitir kullanici:@ali` | Süresini hemen bitirir: botu durur, odası silinir. Yeni key girerse devam eder |
+| `/lisans-iptal kullanici:@ali` | Botunu durdurur, odasını siler, bir daha key giremez (kaldırmak için `/lisans-uzat`) |
+| `/panel-kur` | Bulunduğun kanalı key kanalı yapar ("Key Gir" butonlu panel) |
+| `/yonetim-kur` | Butonlu yönetim panelini kurar |
 
 Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
 
 ## Müşteri akışı
 
-1. Panelde **Key Gir** (ya da `/key-gir`), keyi yazar. Ona özel oda açılır.
+1. Keyini **key kanalına yazar** (ya da "Key Gir" butonu / `/key-gir`). Bot keyi
+   kontrol eder: yanlışsa, kullanılmışsa ya da iptal edilmişse hata verir ve oda
+   açılmaz; doğruysa ona özel oda açılır ve süresi o an başlar. Kanaldaki cevap
+   birkaç saniye sonra kendiliğinden silinir, oda linki ona DM ile de gider.
+   10 dakikada 5 yanlış key deneyen 10 dakika bekletilir.
 2. Odasında: `/baslat host:oyna.sunucu.com sahip:OyunAdı` (sonraki seferlerde
    sadece `/baslat`). `sahip`: botun oyunda sadece onun komutlarını dinlemesi için.
 3. `/gorev` `/durum` `/soyle` `/durdur` odada; `/bilgi` ve `/odam` her yerde.
