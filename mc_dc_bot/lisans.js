@@ -102,7 +102,7 @@ class LisansDeposu {
   // ---------- Keyler ----------
   // sure: milisaniye (0 = süresiz); eski kullanım için gun de olur.
   // Açık keyleri döndürür (bir daha gösterilemez).
-  olustur({ sure, gun, adet = 1, ai = true, direkt = false, simdi = Date.now() } = {}) {
+  olustur({ sure, gun, adet = 1, ai = true, direkt = false, alici = null, simdi = Date.now() } = {}) {
     if (sure === undefined) sure = (gun ?? 30) * GUN
     const yeni = []
     for (let i = 0; i < adet; i++) {
@@ -114,6 +114,7 @@ class LisansDeposu {
         onek: key.slice(0, 10), // "YAREN-AB12": listede tanımak için
         sure,
         direkt, // satıcı /key-ver ile doğrudan verdi
+        alici, // kime verildi (Key Ver), iptal etmek gerekirse bulunsun
         ai: !!ai,
         olusturma: simdi,
         durum: 'bos', // bos | kullanildi | iptal

@@ -94,7 +94,8 @@ başlar**; key beklerken süre yanmaz.
 | `/lisans-uzat kullanici:@ali birim:gün miktar:7` | Süre ekler; süresi bitip odası silindiyse odası geri açılır |
 | `/lisans-bitir kullanici:@ali` | Süresini hemen bitirir: botu durur, odası silinir. Yeni key girerse devam eder |
 | `/lisans-iptal kullanici:@ali` | Botunu durdurur, odasını siler, bir daha key giremez (kaldırmak için `/lisans-uzat`) |
-| `/panel-kur` | Bulunduğun kanalı key kanalı yapar ("Key Gir" butonlu panel) |
+| `/panel-kur` | Bulunduğun kanalı key kanalı yapar ("Key Gir" butonlu panel). Kanala yazılan her mesaj silinir; senin ve yetkililerin key olmayan mesajları (duyuru) kalır |
+| `/panel-kaldir` | Bulunduğun kanal artık key kanalı olmaz (yanlış kanalda kurduysan) |
 | `/yonetim-kur` | Butonlu yönetim panelini kurar |
 
 Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
@@ -105,7 +106,8 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
    kontrol eder: yanlışsa, kullanılmışsa ya da iptal edilmişse hata verir ve oda
    açılmaz; doğruysa ona özel oda açılır ve süresi o an başlar. Kanaldaki cevap
    birkaç saniye sonra kendiliğinden silinir, oda linki ona DM ile de gider.
-   10 dakikada 5 yanlış key deneyen 10 dakika bekletilir.
+   10 dakikada 5 yanlış key deneyen 10 dakika bekletilir. Bot kapalıyken
+   kanala yazılan keyler bot açılınca sahiplerine işlenir (başkası kapamaz).
 2. Odasında: `/baslat host:oyna.sunucu.com sahip:OyunAdı` (sonraki seferlerde
    sadece `/baslat`). `sahip`: botun oyunda sadece onun komutlarını dinlemesi için.
 3. `/gorev` `/durum` `/soyle` `/durdur` odada; `/bilgi` ve `/odam` her yerde.
