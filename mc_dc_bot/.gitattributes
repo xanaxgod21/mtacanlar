@@ -1,0 +1,2 @@
+# Windows komut dosyaları CRLF olmalı, yoksa "goto" satırları bozulabilir
+*.bat text eol=crlf

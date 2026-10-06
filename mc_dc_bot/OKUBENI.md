@@ -4,11 +4,14 @@ Minecraft'ta odun kesen, taş kıran, tarla toplayan bir NPC (Yaren). Sen key
 satarsın, müşteri keyi Discord'da girer, ona özel bir oda açılır ve botunu
 oradan yönetir. Her müşterinin botu senin makinende ayrı çalışır.
 
-## Kurulum (satıcı)
+## Kurulum (satıcı, Windows)
 
-1. Node.js 18 veya üstü kur. Bu klasörde: `npm install`
-2. `ayarlar.ornek.json` dosyasını **`ayarlar.json`** adıyla kopyala ve doldur:
-   - `discord_token`: Developer Portal > Bot > Reset Token
+1. **Node.js** kur: https://nodejs.org adresinden **LTS** sürümünü indir, hep
+   "Next" diyerek kur.
+2. Bu klasörde **`kur.bat`** dosyasına çift tıkla. Paketleri indirir,
+   `ayarlar.json` dosyasını oluşturup Not Defteri'nde açar.
+3. `ayarlar.json` içini doldur, kaydet:
+   - `discord_token`: Developer Portal > uygulaman > Bot > **Reset Token**
    - `guild_id`: satış yaptığın Discord sunucusu
    - `log_kanal_id`: satışların, başlatmaların ve hataların düşeceği kanal (sadece sen gör)
    - `discord_sahip_id`: senin Discord ID'n (key üretir, her odayı görürsün)
@@ -18,14 +21,23 @@ oradan yönetir. Her müşterinin botu senin makinende ayrı çalışır.
    - `ai_gunluk_limit`: müşteri başı günlük yapay zeka isteği (0 = sınırsız).
      Yapay zeka parasını sen ödersin, bu sınır faturanı korur.
    - `musteri_kategori_id`: boş bırakırsan bot "Yaren Odaları" kategorisini açar.
-3. Botu sunucuna **Yönetici** izniyle davet et (en kolayı). Vermek istemezsen
-   en az şunlar lazım: Kanalları Gör, Mesaj Gönder, Mesaj Geçmişini Oku,
-   Bağlantı Yerleştir, Tepki Ekle, Uygulama Komutlarını Kullan, Thread'lerde
-   Mesaj Gönder, Thread Oluştur, Kanalları Yönet, Rolleri Yönet. Bot açılınca
-   eksik izin varsa log kanalına yazar.
-4. `node discordbot.js` (ya da `npm start`). Bilgisayar/VPS kapanınca botlar da
-   kapanır; açınca çalışan müşteri botları kendiliğinden geri gelir.
-5. Müşterilerin göreceği bir kanalda `/panel-kur` yaz: "Key Gir" butonlu panel.
+4. Botu sunucuna **Yönetici** izniyle davet et (en kolayı). Developer Portal >
+   OAuth2 > URL Generator: `bot` ve `applications.commands` kutularını, altta
+   `Administrator` iznini seç, çıkan linki aç. Yönetici vermek istemezsen en az:
+   Kanalları Gör, Mesaj Gönder, Mesaj Geçmişini Oku, Bağlantı Yerleştir, Tepki
+   Ekle, Uygulama Komutlarını Kullan, Thread'lerde Mesaj Gönder, Thread Oluştur,
+   Kanalları Yönet, Rolleri Yönet. Bot açılınca eksik izin varsa log kanalına yazar.
+5. **`baslat.bat`** ile başlat (kapanırsa 10 sn sonra kendisi yeniden açılır).
+   Bilgisayar/VPS kapanınca botlar da kapanır; açınca çalışan müşteri botları
+   kendiliğinden geri gelir.
+6. Müşterilerin göreceği bir kanalda `/panel-kur` yaz: "Key Gir" butonlu panel.
+
+Linux VPS'te: `npm install`, `cp ayarlar.ornek.json ayarlar.json`, `nano ayarlar.json`,
+sonra sürekli çalışsın ve VPS yeniden açılınca kendiliğinden başlasın diye:
+`sudo npm install -g pm2`, `pm2 start discordbot.js --name yaren`, `pm2 save`, `pm2 startup`.
+
+**Güncellerken** yeni dosyaları üstüne kopyala ama `ayarlar.json` ve `veri/`
+klasörüne dokunma (bütün müşteriler orada).
 
 `ayarlar.json`, `anahtar.txt` ve `veri/` klasörü git'e girmez. `veri/lisanslar.json`
 bütün müşterilerin: **yedeğini al**. Keyler orada sadece özet olarak durur;
