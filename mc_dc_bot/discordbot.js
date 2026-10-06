@@ -992,8 +992,8 @@ async function saticiKomutu(i) {
     adminLog(`🎁 ${i.user.tag} → ${u.tag}: ${sureYazi(s.sure)} key ${gitti ? 'DM ile gönderildi' : 'üretildi (DM kapalı)'}.`)
     return i.editReply(
       gitti
-        ? `${u} kişisine **${sureYazi(s.sure)}** key DM ile gönderildi. Keyi girdiği an odası açılacak.`
-        : `${u} kişisinin DM'leri kapalı, keyi sen ilet:\n\`\`\`\n${key}\n\`\`\`\n⚠️ Bir daha gösterilmez, şimdi kopyala.`
+        ? `<@${u.id}> kişisine **${sureYazi(s.sure)}** key DM ile gönderildi. Keyi girdiği an odası açılacak.`
+        : `<@${u.id}> kişisinin DM'leri kapalı, keyi sen ilet:\n\`\`\`\n${key}\n\`\`\`\n⚠️ Bir daha gösterilmez, şimdi kopyala.`
     )
   }
 
