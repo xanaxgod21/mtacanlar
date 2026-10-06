@@ -18,6 +18,7 @@ const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const { Vec3 } = require('vec3')
 const path = require('path')
 const ayarlar = require('./ayarlar')
+const { guvenliBaglanti } = require('./ag')
 
 let createBrain
 try {
@@ -31,11 +32,12 @@ try {
     reflect: async () => '',
     recordEvent() {},
     dersler: () => [],
+    kullanim: () => null,
   })
 }
 
 // ---------- AYARLAR ----------
-// discordbot.js bu değerleri ortam değişkeniyle verir.
+// discordbot.js bu değerleri ortam değişkeniyle verir (her müşteriye ayrı).
 // Elle çalıştırırsan sağdaki varsayılanlar kullanılır.
 const OWNER = ayarlar.mcSahip
 const HOST = process.env.MC_HOST || 'localhost'
@@ -44,24 +46,59 @@ const BOT_NAME = process.env.MC_BOT_NAME || 'GorevBot'
 const AUTH = process.env.MC_AUTH || 'offline' // 'offline' veya 'microsoft'
 const VERSION = process.env.MC_VERSION || ''  // boşsa otomatik algılanır
 const SEARCH_RADIUS = 48
-const KOMUT_PORT = 3030 // ses.py ve discordbot.js buraya bağlanır
+// Deneyim defteri, yapay zeka kullanımı ve Microsoft girişi burada durur.
+// discordbot.js her müşteriye kendi klasörünü verir.
+const VERI_DIR = process.env.MC_VERI_DIR || __dirname
+// ses.py için yerel komut sunucusu. discordbot.js botla IPC üzerinden
+// konuştuğu için onu 0 (kapalı) verir; çok bot aynı portu kapmaya çalışmasın.
+const KOMUT_PORT = parseInt(process.env.KOMUT_PORT ?? '3030', 10) || 0
 
 // Yapay zeka anahtarı: ortam değişkeni, ayarlar.json ya da anahtar.txt.
 // Hiçbiri yoksa yapay zeka kapalı kalır, bot eskisi gibi çalışır.
-const API_KEY = ayarlar.apiKey
+// AI_KAPALI=1 ise (yapay zekasız lisans) dosyada anahtar olsa bile kapalı.
+const API_KEY = process.env.AI_KAPALI === '1' ? '' : ayarlar.apiKey
 const AI_MODEL = ayarlar.aiModel
+const AI_GUNLUK_LIMIT = parseInt(process.env.AI_GUNLUK_LIMIT || '0', 10) || 0 // 0 = sınırsız
 // -----------------------------
 
 const YARDIM = 'Komutlar: !farm !odun !tas !topla !gel !dur !durum !otonom'
 
-const bot = mineflayer.createBot({
+const botSecenek = {
   host: HOST,
   port: PORT,
   username: BOT_NAME,
   auth: AUTH,
   ...(VERSION ? { version: VERSION } : {}),
-})
+  // Microsoft girişi varsayılan olarak herkes için ortak bir klasörde, kullanıcı
+  // adına göre saklanır. Ayrı klasör olmazsa aynı adı yazan başka bir müşteri
+  // senin hesabınla girebilir.
+  profilesFolder: path.join(VERI_DIR, 'giris'),
+  onMsaCode: (d) =>
+    console.log(
+      `[giriş] Microsoft hesabıyla giriş: ${d.verification_uri} adresini aç ve şu kodu yaz: ${d.user_code}`
+    ),
+}
+// Satış sürümünde müşteri botları sadece internetteki sunuculara bağlanır.
+// Kontrol soket açılırken yapılır: yeniden bağlanmada da, alan adı sonradan
+// iç ağa çevrilse de geçerli.
+if (process.env.MC_HEDEF_KONTROL === '1') {
+  botSecenek.connect = guvenliBaglanti(botSecenek, (neden, kalici) => {
+    console.log(`[hata] Bu adrese bağlanamam: ${neden}.`)
+    process.exit(kalici ? 3 : 1) // 3 = kalıcı hata: discordbot.js tekrar denemesin
+  })
+}
+const bot = mineflayer.createBot(botSecenek)
 bot.loadPlugin(pathfinder)
+
+// Giriş bekçisi: Microsoft kodu girilmezse, hesap Minecraft'a sahip değilse ya
+// da sunucu girişi hiç bitirmezse 'end' olayı gelmez ve süreç sonsuza kadar
+// bekleyip bir bot yerini tutardı. Belli sürede oyuna giremezse kapan.
+const GIRIS_SURESI = AUTH === 'microsoft' ? 17 * 60000 : 2 * 60000
+setTimeout(() => {
+  if (hazir) return
+  console.log('[hata] Oyuna giremedim (giriş zaman aşımı), kapanıyorum.')
+  process.exit(1)
+}, GIRIS_SURESI).unref()
 
 let hazir = false       // oyuna girip doğunca true olur
 let taskId = 0          // her yeni görevde artar, eski görev bunu görünce durur
@@ -213,6 +250,7 @@ function snapshot() {
     bos_slot: bot.inventory.emptySlotCount(),
     envanter,
     son_gorev_sonucu: lastResult || null,
+    ai_kullanim: brain.enabled ? brain.kullanim() : null,
   }
 }
 
@@ -295,7 +333,9 @@ const brain = createBrain({
   apiKey: API_KEY,
   model: AI_MODEL,
   owner: OWNER,
-  dataFile: path.join(__dirname, 'deneyim.json'),
+  dataFile: path.join(VERI_DIR, 'deneyim.json'),
+  gunlukLimit: AI_GUNLUK_LIMIT,
+  kullanimDosyasi: path.join(VERI_DIR, 'ai_kullanim.json'),
   log: (...a) => console.log(...a),
   getState: snapshot,
   actions: {
@@ -347,18 +387,57 @@ function onTaskEnd({ name, natural, hata, startedAt, before, not }) {
   }
 }
 
-// ---------- SESLİ KOMUT İÇİN YEREL SUNUCU ----------
-// ses.py ve discordbot.js buraya istek atar:
-//   POST /komut {"komut": "farm"}        -> sabit komut, cevap: {"cevap": "..."}
-//   POST /soyle {"metin": "odun lazım"}  -> yapay zekaya serbest cümle
-//   GET  /durum                          -> botun durumu (JSON)
+// ---------- DIŞARIDAN KOMUT (Discord ve ses.py) ----------
+// Aynı istekler iki yoldan gelir:
+//   discordbot.js -> IPC (process.send), her müşterinin botu ayrı süreç
+//   ses.py        -> yerel HTTP sunucusu (sadece KOMUT_PORT verildiyse)
+//     POST /komut {"komut": "farm"}        -> sabit komut, cevap: {"cevap": "..."}
+//     POST /soyle {"metin": "odun lazım"}  -> yapay zekaya serbest cümle
+//     GET  /durum                          -> botun durumu (JSON)
+async function istekIsle(tip, veri) {
+  if (tip === 'durum') return { kod: 200, veri: snapshot() }
+  if (tip === 'komut') {
+    const cevap = handleCommand('!' + String(veri.komut || '').toLowerCase().trim())
+    if (cevap === null) return { kod: 400, veri: { hata: 'bilinmeyen komut' } }
+    return { kod: 200, veri: { cevap } }
+  }
+  if (tip === 'soyle') {
+    if (!brain.enabled) return { kod: 503, veri: { hata: 'yapay zeka kapalı' } }
+    const metin = String(veri.metin || '').trim().slice(0, 500)
+    console.log('[duydum]', metin)
+    const cevap = await brain.ask(metin || 'merhaba')
+    console.log('[yaren]', cevap)
+    return { kod: 200, veri: { cevap } }
+  }
+  return { kod: 404, veri: { hata: 'yok' } }
+}
+
+if (process.send) {
+  process.on('message', async (m) => {
+    if (!m || typeof m !== 'object') return
+    let sonuc
+    try {
+      sonuc = await istekIsle(m.tip, m)
+    } catch (e) {
+      sonuc = { kod: 500, veri: { hata: e.message } }
+    }
+    try {
+      process.send({ id: m.id, ...sonuc })
+    } catch (_) {}
+  })
+  // Discord botu kapandıysa (ya da çöktüyse) sahipsiz bot oyunda kalmasın
+  process.on('disconnect', () => process.exit(0))
+}
+
 const http = require('http')
 const server = http.createServer((req, res) => {
   const cevapVer = (kod, veri) => {
     res.writeHead(kod, { 'Content-Type': 'application/json; charset=utf-8' })
     res.end(JSON.stringify(veri))
   }
-  if (req.method === 'GET' && req.url === '/durum') return cevapVer(200, snapshot())
+  if (req.method === 'GET' && req.url === '/durum') {
+    return istekIsle('durum').then((s) => cevapVer(s.kod, s.veri))
+  }
   if (req.method !== 'POST' || (req.url !== '/komut' && req.url !== '/soyle')) {
     return cevapVer(404, { hata: 'yok' })
   }
@@ -379,17 +458,8 @@ const server = http.createServer((req, res) => {
     } catch (_) {
       return cevapVer(400, { hata: 'bozuk JSON' })
     }
-    if (req.url === '/komut') {
-      const cevap = handleCommand('!' + String(json.komut || '').toLowerCase().trim())
-      if (cevap === null) return cevapVer(400, { hata: 'bilinmeyen komut' })
-      return cevapVer(200, { cevap })
-    }
-    if (!brain.enabled) return cevapVer(503, { hata: 'yapay zeka kapalı' })
-    const metin = String(json.metin || '').trim()
-    console.log('[duydum]', metin)
-    const cevap = await brain.ask(metin || 'merhaba')
-    console.log('[yaren]', cevap)
-    cevapVer(200, { cevap })
+    const s = await istekIsle(req.url.slice(1), json || {})
+    cevapVer(s.kod, s.veri)
   })
 })
 server.on('error', (e) =>
@@ -397,9 +467,11 @@ server.on('error', (e) =>
     `[hata] Komut sunucusu açılamadı (port ${KOMUT_PORT}): ${e.message}. Başka bir gorevbot açık olabilir.`
   )
 )
-server.listen(KOMUT_PORT, '127.0.0.1', () =>
-  console.log(`Ses komut sunucusu: 127.0.0.1:${KOMUT_PORT}`)
-)
+if (KOMUT_PORT) {
+  server.listen(KOMUT_PORT, '127.0.0.1', () =>
+    console.log(`Ses komut sunucusu: 127.0.0.1:${KOMUT_PORT}`)
+  )
+}
 
 // ---------- GÖREV YÖNETİMİ ----------
 // Görev döngüsü devam etsin mi? Durdurulunca ya da süresi dolunca false olur.
@@ -439,7 +511,9 @@ function startTask(name, fn, dakika = 0) {
     .then(() => fn(id))
     .catch((e) => {
       hata = e
-      console.error('Görev hatası:', e)
+      // Müşteri odasına sadece mesaj gitsin; tam hata (sunucudaki dosya yollarıyla) satıcıya
+      console.log('[hata] Görev hatası:', e.message || e)
+      console.error('[satıcı] Görev hatası:', e && e.stack)
     })
     .finally(() => {
       clearTimeout(g.zamanlayici)
@@ -1134,8 +1208,17 @@ async function farmTask(id) {
   }
 }
 
-bot.on('kicked', (r) => console.log('[olay] Sunucudan atıldı:', JSON.stringify(r)))
-bot.on('error', (e) => console.log('[olay] Hata:', e.message || e))
+process.on('uncaughtException', (e) => {
+  console.log('[hata] Beklenmeyen hata, bot kapanıyor:', e.message)
+  console.error('[satıcı] Beklenmeyen hata:', e.stack)
+  process.exit(1)
+})
+bot.on('kicked', (r) => console.log('[olay] Sunucudan atıldı:', JSON.stringify(r).slice(0, 300)))
+bot.on('error', (e) => {
+  console.log('[olay] Hata:', e.message || e)
+  // Daha bağlanmadan (ör. Microsoft girişi başarısız) hata olursa 'end' gelmez
+  if (!hazir && !bot._client?.socket) process.exit(1)
+})
 bot.on('death', () => {
   console.log('[olay] Bot öldü')
   const p = bot.entity ? bot.entity.position : null

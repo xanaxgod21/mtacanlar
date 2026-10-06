@@ -2,8 +2,10 @@
   "discord_token": "BURAYA_DISCORD_BOT_TOKENI",
   "guild_id": "1062443427964399687",
   "log_kanal_id": "1556774227191922848",
-  "kontrol_kanal_id": "1556774274453209108",
   "discord_sahip_id": "561571565527891985",
+  "musteri_kategori_id": "",
+  "max_bot": 20,
+  "ai_gunluk_limit": 200,
   "mc_sahip": "Lyraiv",
   "anthropic_api_key": "BURAYA_ANTHROPIC_ANAHTARI",
   "ai_model": "claude-haiku-4-5-20251001"

@@ -77,10 +77,49 @@ const TOOLS = [
   },
 ]
 
-function createBrain({ apiKey, model, owner, dataFile, log, getState, actions, fetchFn }) {
+function createBrain({
+  apiKey,
+  model,
+  owner,
+  dataFile,
+  log,
+  getState,
+  actions,
+  fetchFn,
+  gunlukLimit = 0, // günde en fazla bu kadar API isteği (0 = sınırsız)
+  kullanimDosyasi = null,
+}) {
   const doFetch = fetchFn || fetch
   const enabled = !!apiKey
   const say = log || (() => {})
+
+  // ---------- Günlük kullanım sınırı ----------
+  // Satışta yapay zeka parasını sen ödersin: bir müşteri günde sınırsız
+  // konuşup faturanı şişirmesin. Sayım dosyada tutulur, bot yeniden
+  // başlayınca sıfırlanmaz.
+  const bugun = () => new Date().toLocaleDateString('sv-SE') // 2026-10-06 (yerel saat)
+  let kullanim = { gun: bugun(), sayi: 0 }
+  if (kullanimDosyasi) {
+    try {
+      const k = JSON.parse(fs.readFileSync(kullanimDosyasi, 'utf-8'))
+      if (k && typeof k.sayi === 'number') kullanim = k
+    } catch (_) {}
+  }
+  function hakKullan() {
+    if (!gunlukLimit) return
+    if (kullanim.gun !== bugun()) kullanim = { gun: bugun(), sayi: 0 }
+    if (kullanim.sayi >= gunlukLimit) {
+      const e = new Error('günlük yapay zeka sınırı doldu')
+      e.limit = true
+      throw e
+    }
+    kullanim.sayi++
+    if (kullanimDosyasi) {
+      try {
+        fs.writeFileSync(kullanimDosyasi, JSON.stringify(kullanim), 'utf-8')
+      } catch (_) {}
+    }
+  }
 
   // ---------- Deneyim defteri ----------
   let data = { dersler: [], olaylar: [] }
@@ -165,6 +204,7 @@ ${dersler}`
 
   // ---------- API ----------
   async function callApi(system, messages) {
+    hakKullan()
     // 429 (çok istek), 5xx ve 529 (aşırı yoğunluk) geçicidir: bekleyip 3 kez dene
     for (let deneme = 1; ; deneme++) {
       let r
@@ -195,7 +235,9 @@ ${dersler}`
         continue
       }
       const t = await r.text().catch(() => '')
-      throw new Error(`API ${r.status}: ${String(t).slice(0, 200)}`)
+      // Ayrıntı (ör. "kredi bitti", "anahtar geçersiz") sadece satıcının loguna
+      say('[satıcı] Anthropic API hatası', r.status, String(t).slice(0, 300))
+      throw new Error(`API ${r.status}`)
     }
   }
 
@@ -274,6 +316,7 @@ ${dersler}`
         return cevap
       } catch (e) {
         say('[ai] hata:', e.message)
+        if (e.limit) return 'Bugünlük konuşma hakkım bitti, yarın yine konuşalım.'
         return 'Şu an düşünemiyorum.'
       }
     })
@@ -331,6 +374,7 @@ Bundan gelecekte işe yarayacak GENEL bir ders çıkar ve ders_kaydet ile yaz (z
     reflect,
     recordEvent,
     dersler: () => data.dersler,
+    kullanim: () => ({ ...kullanim, limit: gunlukLimit }),
   }
 }
 
