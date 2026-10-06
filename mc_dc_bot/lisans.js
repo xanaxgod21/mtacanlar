@@ -55,11 +55,18 @@ class LisansDeposu {
       this.veri = coz(ham || '')
     } catch (e) {
       // Kayıt yarıda kaldıysa en yeni hâl .tmp dosyasındadır
+      let kurtarildi = false
       try {
         this.veri = coz(oku(dosya + '.tmp') || '')
-        this.log(`[lisans] ${path.basename(dosya)} bozuktu, .tmp kopyasından okundu.`)
-        return
+        kurtarildi = true
       } catch (_) {}
+      if (kurtarildi) {
+        // log hatası (ör. kaydedici henüz hazır değil) kurtarılan veriyi kaybettirmesin
+        try {
+          this.log(`[lisans] ${path.basename(dosya)} bozuktu, .tmp kopyasından okundu.`)
+        } catch (_) {}
+        return
+      }
       // Bozuk dosyanın üstüne yazıp bütün müşterileri kaybetmeyelim
       const yedek = `${dosya}.bozuk-${Date.now()}`
       try {

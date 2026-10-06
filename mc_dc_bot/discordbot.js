@@ -78,7 +78,8 @@ if (eksik.length > 0) {
 
 let depo
 try {
-  depo = new LisansDeposu(path.join(VERI_DIR, 'lisanslar.json'), (m) => adminLog(m))
+  // adminLog aşağıda tanımlı: açılışta (dosya kurtarma) yazılan log sonraya ertelenir
+  depo = new LisansDeposu(path.join(VERI_DIR, 'lisanslar.json'), (m) => setImmediate(() => adminLog(m)))
 } catch (e) {
   console.error('Lisans dosyası okunamadı:', e.message)
   process.exit(1)
@@ -766,6 +767,7 @@ client.once(Events.ClientReady, async () => {
     console.error(`Slash komutları kaydedilemedi (${e.message}). guild_id doğru mu, bot o sunucuda mı?`)
   }
   await zamanKontrol()
+  if (mesajOkunur) kacanKeyMesajlari().catch(() => {})
   // Satıcı botu yeniden başlattıysa (VPS yeniden açıldı vb.) çalışan botları geri getir
   const geriGelecek = depo.ozetListe().lisanslar.filter((l) => depo.aktifMi(l) && l.calisiyordu && l.son)
   for (const [n, l] of geriGelecek.entries()) {
@@ -1081,6 +1083,16 @@ async function lisansKapatIslem(yapan, u, nasil) {
   if (nasil === 'bitir' && !depo.aktifMi(l)) {
     return `Bu kişinin lisansı zaten ${l.durum === 'iptal' ? 'iptal edilmiş' : 'bitmiş'}.`
   }
+  // o an key giriyor / odası açılıyorsa araya girme (yarım kalmış durum olmasın)
+  if (islemde.has(u.id)) return 'Bu kişinin bir işlemi sürüyor (key giriyor olabilir), birkaç saniye sonra tekrar dene.'
+  islemde.add(u.id)
+  try {
+    return await lisansKapat(yapan, u, nasil)
+  } finally {
+    islemde.delete(u.id)
+  }
+}
+async function lisansKapat(yapan, u, nasil) {
   denemeIptal(u.id)
   if (nasil === 'iptal') depo.iptalEt(u.id)
   else depo.bitir(u.id)
@@ -1137,7 +1149,7 @@ function kisiBilgiMetni(userId) {
     `Yapay zeka: **${aiAcik ? 'açık' : 'kapalı'}**` + (aiAcik && aiBitis && aiBitis !== l.bitis ? ` (bitiş: ${zaman(aiBitis, 'R')})` : ''),
     `Bot: **${yonetici.calisiyor(userId) ? 'çalışıyor' : 'kapalı'}**` + (l.son ? ` (son sunucu: ${l.son.host}:${l.son.port})` : ''),
     `Oda: ${l.kanalId ? `<#${l.kanalId}>` : 'yok'}`,
-    `Kullandığı keyler: ${(l.keyler || []).map((k) => `\`${k}…\``).join(', ') || '-'}`,
+    `Kullandığı keyler (${(l.keyler || []).length}): ${(l.keyler || []).length > 20 ? '… ' : ''}${(l.keyler || []).slice(-20).map((k) => `\`${k}…\``).join(', ') || '-'}`,
     `İlk key: ${zaman(l.olusturma)}`,
   ].join('\n')
 }
@@ -1192,10 +1204,20 @@ async function saticiKomutu(i) {
 // keyini kanala mesaj olarak da yazabilir. Yazılan mesaj hemen silinir (key
 // başkası tarafından görülmesin), cevap birkaç saniye sonra kendiliğinden kalkar.
 const PANEL_DOSYA = path.join(VERI_DIR, 'paneller.json')
-let paneller = {} // { keyKanalId, yonetimKanalId, yonetimMesajId }
+// { keyKanalId (en son kurulan), keyKanallari: [...], yonetimKanalId, yonetimMesajId }
+let paneller = {}
 try {
-  paneller = JSON.parse(fs.readFileSync(PANEL_DOSYA, 'utf-8').replace(/^﻿/, '')) || {}
-} catch (_) {}
+  paneller = JSON.parse(fs.readFileSync(PANEL_DOSYA, 'utf-8').replace(/^\uFEFF/, '')) || {}
+} catch (e) {
+  if (e.code !== 'ENOENT') {
+    setImmediate(() =>
+      adminLog(`⚠️ paneller.json okunamadı (${e.message}). Key kanalında /panel-kur, yönetim kanalında /yonetim-kur'u tekrar yaz.`)
+    )
+  }
+}
+// /panel-kur birden çok kanalda yazıldıysa hepsi key kanalıdır (eski panel metni de "buraya yaz" diyor)
+paneller.keyKanallari = [...new Set([...(paneller.keyKanallari || []), paneller.keyKanalId].filter(Boolean))]
+const keyKanaliMi = (id) => paneller.keyKanallari.includes(id)
 function panelKaydet() {
   try {
     fs.mkdirSync(VERI_DIR, { recursive: true })
@@ -1206,10 +1228,21 @@ function panelKaydet() {
   }
 }
 
-// Kanal herkese açık mı (@everyone görebiliyor mu)
+// Kanal herkese açık mı: @everyone ya da yönetici/yetkili olmayan herhangi bir rol
+// (ör. kayıtlı sunuculardaki "Üye" rolü) görebiliyorsa açık sayılır
 function herkeseAcik(kanal, guild) {
-  const izin = kanal?.permissionsFor?.(guild.roles.everyone)
-  return !izin || izin.has(PermissionFlagsBits.ViewChannel)
+  if (!kanal?.permissionsFor) return true
+  const gorur = (r) => kanal.permissionsFor(r)?.has(PermissionFlagsBits.ViewChannel) !== false
+  if (gorur(guild.roles.everyone)) return true
+  const roller = guild.roles.cache ? [...guild.roles.cache.values()] : []
+  return roller.some(
+    (r) =>
+      r.id !== guild.roles.everyone.id &&
+      r.id !== yetkiliRol?.id &&
+      !r.managed && // botların kendi rolleri
+      !r.permissions?.has(PermissionFlagsBits.Administrator) &&
+      gorur(r)
+  )
 }
 
 async function panelKur(i) {
@@ -1240,6 +1273,7 @@ async function panelKur(i) {
     return i.reply(gizli(`Bu kanala yazamıyorum (${e.message}). Botun burada "Mesaj Gönder" ve "Bağlantı Yerleştir" izni olmalı.`))
   }
   paneller.keyKanalId = ch.id
+  paneller.keyKanallari = [...new Set([...paneller.keyKanallari, ch.id])].slice(-10)
   panelKaydet()
   const notlar = ['Panel kuruldu, bu kanal artık key kanalı.']
   if (!mesajOkunur) {
@@ -1261,44 +1295,63 @@ async function geciciCevap(kanal, userId, content, sn) {
   if (m) setTimeout(() => m.delete().catch(() => {}), sn * 1000)
 }
 
-client.on(Events.MessageCreate, async (m) => {
-  try {
-    if (!paneller.keyKanalId || m.channelId !== paneller.keyKanalId) return
-    if (m.guildId !== GUILD_ID || m.author?.bot || m.system || m.webhookId) return
-    // Mesajı hemen sil: key kanalda kimse tarafından görülmesin
-    const silindi = await m.delete().then(
-      () => true,
-      () => false
-    )
-    if (!silindi && !silmeUyarisi.verildi) {
-      silmeUyarisi.verildi = true
-      adminLog('⚠️ Key kanalındaki mesajları silemiyorum: botun o kanalda "Mesajları Yönet" izni olmalı (yoksa yazılan keyleri herkes görür).')
-    }
-    const simdi = Date.now()
-    const once = sonYazma.get(m.author.id)
-    sonYazma.set(m.author.id, simdi)
-    if (once && simdi - once < 3000) return // spam: sessizce sil
-    const metin = (m.content || '').trim()
-    if (!metin) {
-      // Message Content Intent kapalıysa yazılanı göremeyiz
-      return geciciCevap(m.channel, m.author.id, `<@${m.author.id}> keyini girmek için yukarıdaki **Key Gir** butonuna bas.`, 15)
-    }
-    const key = metin.match(/YAREN[\s-]*(?:[A-Z0-9]{4}[\s-]*){4}/i)?.[0]
-    if (!key) {
-      return geciciCevap(
-        m.channel,
-        m.author.id,
-        `<@${m.author.id}> bu kanala sadece keyini yaz (YAREN-XXXX-XXXX-XXXX-XXXX) ya da **Key Gir** butonuna bas.`,
-        15
-      )
-    }
+async function keyMesaji(m) {
+  if (!keyKanaliMi(m.channelId)) return
+  if (m.guildId !== GUILD_ID || m.author?.bot || m.system || m.webhookId) return
+  // Mesajı hemen sil: key kanalda kimse tarafından görülmesin
+  const silindi = await m.delete().then(
+    () => true,
+    () => false
+  )
+  if (!silindi && !silmeUyarisi.verildi) {
+    silmeUyarisi.verildi = true
+    adminLog('⚠️ Key kanalındaki mesajları silemiyorum: botun o kanalda "Mesajları Yönet" izni olmalı (yoksa yazılan keyleri herkes görür).')
+  }
+  const metin = (m.content || '').trim()
+  const key = metin.match(/YAREN[\s-]*(?:[A-Z0-9]{4}[\s-]*){4}/i)?.[0]
+  if (key) {
+    // keyler hiç atlanmaz; yanlış key denemesi sınırı ve işlem kilidi keyIsle'de
     const r = await keyIsle(m.author, m.guild, key)
     await geciciCevap(m.channel, m.author.id, `<@${m.author.id}> ${r.ok ? '✅' : '❌'} ${r.metin}`, r.ok ? 30 : 20)
     if (r.ok) await dmGonder(m.author.id, `Yaren: ${r.metin}`)
-  } catch (e) {
-    console.error('Key kanalı:', e)
+    return
   }
-})
+  // key olmayan mesajlara art arda cevap verme (kanal dolmasın, Discord sınırına takılmasın)
+  const zamani = m.createdTimestamp || Date.now()
+  const once = sonYazma.get(m.author.id)
+  sonYazma.set(m.author.id, zamani)
+  if (once && zamani - once < 3000) return
+  if (!metin) {
+    // Message Content Intent kapalıysa yazılanı göremeyiz
+    return geciciCevap(m.channel, m.author.id, `<@${m.author.id}> keyini girmek için yukarıdaki **Key Gir** butonuna bas.`, 15)
+  }
+  return geciciCevap(
+    m.channel,
+    m.author.id,
+    `<@${m.author.id}> bu kanala sadece keyini yaz (YAREN-XXXX-XXXX-XXXX-XXXX) ya da **Key Gir** butonuna bas.`,
+    15
+  )
+}
+client.on(Events.MessageCreate, (m) => keyMesaji(m).catch((e) => console.error('Key kanalı:', e)))
+
+// Bot kapalıyken key kanalına yazılanlar (silinmemiş, cevapsız kalmış keyler)
+async function kacanKeyMesajlari() {
+  for (const id of paneller.keyKanallari) {
+    try {
+      const kanal = await kanalGetir(id)
+      if (!kanal?.messages) continue
+      const hepsi = [...(await kanal.messages.fetch({ limit: 50 })).values()]
+      // kapanmadan silinemeyen kendi geçici cevaplarımız (panel mesajı kalır)
+      for (const m of hepsi) {
+        if (m.author?.id === client.user.id && !m.embeds?.length && !m.components?.length) await m.delete().catch(() => {})
+      }
+      const mesajlar = hepsi.filter((m) => !m.author?.bot).sort((a, b) => (a.createdTimestamp || 0) - (b.createdTimestamp || 0))
+      for (const m of mesajlar) await keyMesaji(m).catch((e) => console.error('Key kanalı:', e))
+    } catch (e) {
+      console.error(`Key kanalı okunamadı (${id}):`, e.message)
+    }
+  }
+}
 setInterval(() => {
   const once = Date.now() - 60000
   for (const [id, t] of sonYazma) if (t < once) sonYazma.delete(id)
@@ -1482,6 +1535,9 @@ const FORMLAR = {
     ),
 }
 
+// Onay butonu bu sürümle eşleşmezse lisans arada değişmiş demektir
+const lisansSurumu = (l) => (l ? `${l.durum}.${l.bitis ?? 's'}.${(l.keyler || []).length}` : 'yok')
+
 // Formdaki sayı alanı: boşsa null, sayı değilse NaN (sureCoz reddeder)
 const sayiAl = (v) => (String(v ?? '').trim() === '' ? null : /^\d+$/.test(String(v).trim()) ? parseInt(v, 10) : NaN)
 
@@ -1498,9 +1554,13 @@ async function yonetimEtkilesim(i) {
     return
   }
 
-  // "Emin misin?" onayı: ypo:bitir:<userId>:<bitir|iptal>
+  // "Emin misin?" onayı: ypo:bitir:<userId>:<bitir|iptal>:<lisans sürümü>
   if (i.isButton() && tur === 'ypo' && ne === 'bitir') {
-    const [uid, nasil] = ek
+    const [uid, nasil, surum] = ek
+    // onay ekranı açıkken kişi yeni key girdiyse ya da başka biri bitirdiyse eski onayla işlem yapma
+    if (lisansSurumu(depo.bul(uid)) !== surum) {
+      return i.update({ content: 'Bu arada lisans değişti (yeni key, uzatma ya da bitirme). Panelden tekrar seç.', components: [] })
+    }
     await i.deferUpdate()
     const u = await client.users.fetch(uid).catch(() => ({ id: uid }))
     return i.editReply({ content: await lisansKapatIslem(i.user, u, nasil === 'iptal' ? 'iptal' : 'bitir'), components: [], ...sessiz })
@@ -1533,11 +1593,12 @@ async function yonetimEtkilesim(i) {
     const l = depo.bul(u.id)
     if (!l) return i.reply(gizli('Bu kişinin lisansı yok.'))
     const ne2 = nasil === 'iptal' ? '**iptal etmek** (bir daha key giremez)' : '**süresini şimdi bitirmek** (yeni key girerse devam eder)'
+    const surum = lisansSurumu(l)
     return i.reply({
       ...gizli(`<@${u.id}> lisansını ${ne2} istediğine emin misin? Botu durur, odası silinir.`),
       components: [
         new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`ypo:bitir:${u.id}:${nasil}`).setLabel('Evet').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId(`ypo:bitir:${u.id}:${nasil}:${surum}`).setLabel('Evet').setStyle(ButtonStyle.Danger),
           new ButtonBuilder().setCustomId('yp:vazgec').setLabel('Vazgeç').setStyle(ButtonStyle.Secondary)
         ),
       ],
