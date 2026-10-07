@@ -24,8 +24,11 @@ ayrı çalışır.
    - `oda_silme_saat`: süre bitince müşterinin odası kaç saat sonra silinsin
      (0 = hemen silinir; örneğin 24 yazarsan oda 1 gün kilitli bekler, sonra silinir)
    - `anthropic_api_key`: yapay zeka için (boşsa yapay zeka kapalı)
-   - `max_bot`: aynı anda en fazla kaç müşteri botu çalışsın. Her bot yaklaşık
-     150 MB RAM yer, 20 bot için en az 4 GB RAM'li bir VPS al.
+   - `max_bot`: aynı anda en fazla kaç müşteri botu çalışsın (her müşteri 1 bot,
+     her bot kendi sunucusuna girer). Ölçülen: bot başı ~140 MB RAM; boştayken
+     neredeyse CPU yemez, görev yaparken (odun/taş) bot başı ~0,2 çekirdek.
+     20 bot için en az **4 GB RAM, 4 çekirdekli** bir VPS al. Daha fazla müşteri
+     için sayıyı artır, RAM'i ona göre büyüt (40 bot ≈ 6-8 GB).
    - `ai_gunluk_limit`: müşteri başı günlük yapay zeka isteği (0 = sınırsız).
      Yapay zeka parasını sen ödersin, bu sınır faturanı korur.
    - `musteri_kategori_id`: boş bırakırsan bot "Yaren Odaları" kategorisini açar.
