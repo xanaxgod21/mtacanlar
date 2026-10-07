@@ -90,6 +90,8 @@ function createBrain({
   kullanimDosyasi = null,
 }) {
   const doFetch = fetchFn || fetch
+  // sahip sonradan değişebilir (/sahip): her istekte güncel adı al
+  const sahipAdi = () => (typeof owner === 'function' ? owner() : owner) || 'henüz belli değil'
   const enabled = !!apiKey
   const say = log || (() => {})
 
@@ -186,7 +188,7 @@ function createBrain({
         .slice(-20)
         .map((d) => `- (${d.gorev || 'genel'}) ${d.ders}`)
         .join('\n') || '- (henüz yok)'
-    return `Sen "Yaren" adında, Minecraft dünyasında yaşayan bir NPC'sin. Sahibin ${owner}. Onun isteklerini yerine getirirsin.
+    return `Sen "Yaren" adında, Minecraft dünyasında yaşayan bir NPC'sin. Sahibin ${sahipAdi()}. Onun isteklerini yerine getirirsin.
 
 Konuşma: Türkçe, samimi ve KISA konuş (en fazla 2 kısa cümle, sesli okunacak). Emoji ve madde işareti kullanma.
 

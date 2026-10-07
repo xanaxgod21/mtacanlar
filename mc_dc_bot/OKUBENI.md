@@ -111,12 +111,17 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
    birkaç saniye sonra kendiliğinden silinir, oda linki ona DM ile de gider.
    10 dakikada 5 yanlış key deneyen 10 dakika bekletilir. Bot kapalıyken
    kanala yazılan keyler bot açılınca sahiplerine işlenir (başkası kapamaz).
-2. Odasında: `/baslat host:oyna.sunucu.com sahip:OyunAdı` (sonraki seferlerde
-   sadece `/baslat`). `sahip`: botun oyunda sadece onun komutlarını dinlemesi için.
-3. `/gorev` `/durum` `/soyle` `/durdur` odada; `/bilgi` ve `/odam` her yerde.
-4. Kalan süreyi odada, `/bilgi`'de ve oda başlığında görür (geri sayım). Bitişe
+2. Odasında `/baslat host:oyna.sunucu.com` yazar, bot sunucuya girer (sonraki
+   seferlerde sadece `/baslat`).
+3. Bot girince odasında `/sahip ad:OyundakiAdı` yazar (örn. `/sahip ad:xdarkoum`).
+   Bot artık oyunda **sadece o oyuncunun** yazdıklarını yapar: `!odun` `!tas`
+   `!farm` `!gel` `!dur` `!durum`, ya da "Yaren biraz odun lazım" gibi konuşur.
+   Büyük/küçük harf fark etmez, istediği zaman `/sahip` ile değiştirir; boş
+   `/sahip` şu anki sahibi gösterir. Sahip yazılmadıysa bot kimseyi dinlemez.
+4. `/gorev` `/durum` `/soyle` `/sandik` `/durdur` odada; `/bilgi` ve `/odam` her yerde.
+5. Kalan süreyi odada, `/bilgi`'de ve oda başlığında görür (geri sayım). Bitişe
    1 gün ve 1 saat kala uyarılır.
-5. Süre bitince botu durur, **odası silinir** ve DM ile haber verilir. Yeni key
+6. Süre bitince botu durur, **odası silinir** ve DM ile haber verilir. Yeni key
    girerse odası yeniden açılır; botunun ayarları, sandıkları, deneyimleri kaybolmaz.
    Süresi bitmeden yeni key girerse süre kalan sürenin üstüne eklenir.
 

@@ -2,7 +2,8 @@
 // Kurulum: npm install
 // Çalıştırma: node discordbot.js (bu dosyayı o başlatır) ya da elle: node gorevbot.js
 //
-// Oyun içi komutlar (sadece OWNER yazabilir, fısıltıyla da olur):
+// Oyun içi komutlar (sadece sahip yazabilir, fısıltıyla da olur; sahip Discord'da
+// /sahip ile verilir, büyük/küçük harf fark etmez):
 //   !farm   -> olgun ürünleri toplar ve yeniden eker
 //   !odun   -> yakındaki ağaçları keser
 //   !tas    -> taş kırar (kazma gerekir)
@@ -42,7 +43,12 @@ try {
 // ---------- AYARLAR ----------
 // discordbot.js bu değerleri ortam değişkeniyle verir (her müşteriye ayrı).
 // Elle çalıştırırsan sağdaki varsayılanlar kullanılır.
-const OWNER = ayarlar.mcSahip
+// Sahip: bot oyunda sadece onun yazdıklarını yapar. Discord'dan /sahip ile sonradan
+// verilir ya da değiştirilir. Discord botu başlattıysa (MC_YONETILEN) sahip yoksa
+// kimseyi dinlemez; elle çalıştırınca ayarlar.json'daki mc_sahip kullanılır.
+let OWNER = process.env.MC_YONETILEN === '1' ? String(process.env.MC_OWNER || '').trim() : ayarlar.mcSahip
+const SAHIP_RE = /^[A-Za-z0-9_]{3,16}$/
+const sahipMi = (ad) => !!OWNER && String(ad || '').toLowerCase() === OWNER.toLowerCase()
 const HOST = process.env.MC_HOST || 'localhost'
 const PORT = parseInt(process.env.MC_PORT || '25565', 10)
 const BOT_NAME = process.env.MC_BOT_NAME || 'GorevBot'
@@ -118,6 +124,11 @@ bot.once('spawn', () => {
   hazir = true
   restoreMovements()
   console.log(`[olay] Sunucuya girdi: ${HOST}:${PORT} (${BOT_NAME})`)
+  if (!OWNER) {
+    console.log('[sahip] Henüz sahibim yok, kimsenin yazdığını yapmıyorum. Discord odana /sahip ad:OyunAdın yaz.')
+  } else {
+    console.log(`[sahip] Oyunda sadece ${OWNER} oyuncusunun yazdıklarını yapıyorum.`)
+  }
   say(`Hazırım! ${YARDIM}`)
 })
 
@@ -139,8 +150,15 @@ function say(msg) {
 }
 
 // ---------- KOMUTLAR ----------
+// Oyundaki sahip (adını farklı büyük/küçük harfle yazmış olabilir)
+function sahipOyuncu() {
+  if (!OWNER) return null
+  const ad = Object.keys(bot.players).find(sahipMi)
+  return ad ? bot.players[ad] : null
+}
+
 async function onOwnerMessage(username, message) {
-  if (username !== OWNER) return
+  if (!sahipMi(username)) return
   const text = String(message).trim()
   if (text.startsWith('!')) return handleCommand(text.toLowerCase())
   const m = text.match(/^yaren[\s,:!]*(.*)$/i)
@@ -197,7 +215,7 @@ function komut(cmd) {
 }
 
 function comeToOwner() {
-  const p = bot.players[OWNER]?.entity
+  const p = sahipOyuncu()?.entity
   if (!p) return 'Seni göremiyorum, yakın değilsin.'
   const myId = taskId
   bot.pathfinder
@@ -258,6 +276,8 @@ function snapshot() {
     envanter,
     son_gorev_sonucu: lastResult || null,
     sandik_sayisi: sandiklar().length,
+    sahip: OWNER || null,
+    sahip_gorunuyor: !!sahipOyuncu()?.entity,
     ai_kullanim: brain.enabled ? brain.kullanim() : null,
   }
 }
@@ -352,7 +372,7 @@ async function otonomLoop(run) {
 const brain = createBrain({
   apiKey: API_KEY,
   model: AI_MODEL,
-  owner: OWNER,
+  owner: () => OWNER,
   dataFile: path.join(VERI_DIR, 'deneyim.json'),
   gunlukLimit: AI_GUNLUK_LIMIT,
   kullanimDosyasi: path.join(VERI_DIR, 'ai_kullanim.json'),
@@ -420,6 +440,14 @@ async function istekIsle(tip, veri) {
     const cevap = handleCommand('!' + String(veri.komut || '').toLowerCase().trim())
     if (cevap === null) return { kod: 400, veri: { hata: 'bilinmeyen komut' } }
     return { kod: 200, veri: { cevap } }
+  }
+  if (tip === 'sahip') {
+    const ad = String(veri.ad || '').trim()
+    if (ad && !SAHIP_RE.test(ad)) return { kod: 400, veri: { hata: 'geçersiz Minecraft adı' } }
+    OWNER = ad
+    console.log(ad ? `[sahip] Artık oyunda sadece ${ad} oyuncusunun yazdıklarını yapıyorum.` : '[sahip] Sahip kaldırıldı, kimseyi dinlemiyorum.')
+    if (ad && hazir) say(`${ad}, artık senin komutlarını dinliyorum. !yardim yazarsan neler yapabildiğimi söylerim.`)
+    return { kod: 200, veri: { cevap: ad, oyunda: !!sahipOyuncu(), hazir } }
   }
   if (tip === 'soyle') {
     if (!brain.enabled) return { kod: 503, veri: { hata: 'yapay zeka kapalı' } }
@@ -686,7 +714,7 @@ function sandiklariKaydet(liste) {
 
 // Sahibin dibindeki (5 blok) sandık; liste verilirse sadece onlardan seçer
 function sahibeEnYakinSandik(liste = null) {
-  const sahip = bot.players[OWNER]?.entity
+  const sahip = sahipOyuncu()?.entity
   if (!sahip) return null
   const adaylar =
     liste || bot.findBlocks({ matching: (b) => SANDIK_TURLERI.has(b.name), maxDistance: 32, count: 64 })

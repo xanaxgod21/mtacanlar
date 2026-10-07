@@ -57,7 +57,8 @@ class BotYonetici extends EventEmitter {
       MC_BOT_NAME: ayar.user,
       MC_AUTH: ayar.auth,
       MC_VERSION: ayar.version || '',
-      MC_OWNER: ayar.owner,
+      MC_OWNER: ayar.owner || '',
+      MC_YONETILEN: '1', // sahip boşsa bot kimseyi dinlemesin (satıcının mc_sahip adına düşmesin)
       MC_VERI_DIR: dir,
       KOMUT_PORT: '0', // HTTP yok, IPC var: 50 bot aynı portu kapmaya çalışmasın
       AI_KAPALI: aiAcik ? '0' : '1',

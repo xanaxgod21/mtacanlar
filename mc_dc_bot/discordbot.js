@@ -438,11 +438,12 @@ function hosgeldin(l) {
     `Lisans bitişi: ${bitisDiscord(l)} | Yapay zeka: **${depo.aiAktifMi(l) && ayarlar.apiKey ? 'açık' : 'kapalı'}**`,
     l.bitis !== null ? 'Süren bitince bu oda silinir. Yeni key girersen yeniden açılır, ayarların kaybolmaz.' : '',
     '',
-    '**Başlamak için:** `/baslat host:sunucu.adresi sahip:OyundakiAdın`',
-    '`sahip`: botun oyunda sadece senin komutlarını dinlemesi için senin Minecraft adın.',
+    '**Başlamak için:**',
+    '1. `/baslat host:sunucu.adresi` yaz, bot sunucuya girer.',
+    '2. `/sahip ad:OyundakiAdın` yaz (örn. `/sahip ad:xdarkoum`). Bot oyunda sadece senin yazdıklarını yapar.',
     'Bir kere yazman yeter, sonraki seferlerde sadece `/baslat` yazabilirsin.',
     '',
-    'Diğer komutlar: `/gorev` `/durum` `/sandik` `/soyle` `/durdur` `/bilgi`',
+    'Diğer komutlar: `/sahip` `/gorev` `/durum` `/sandik` `/soyle` `/durdur` `/bilgi`',
     'Oyun içinde: `!odun` `!tas` `!farm` `!topla` `!bosalt` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş.',
     '**Sandık:** oyunda sandığın dibinde dur ve `!sandik ekle` yaz. Bot envanteri yarı dolunca topladıklarını oraya bırakır, baltası kırılmak üzereyse oradan yenisini alır.',
   ].join('\n')
@@ -629,7 +630,7 @@ const COMMANDS = [
     description: 'Botunu bir Minecraft sunucusuna sokar',
     options: [
       { name: 'host', description: 'Sunucu adresi (örn. oyna.ornek.com). Boşsa son kullandığın', type: S.String },
-      { name: 'sahip', description: 'Oyundaki adın: bot sadece senin komutlarını dinler', type: S.String },
+      { name: 'sahip', description: 'Oyundaki adın (istersen sonra /sahip ile de verirsin)', type: S.String },
       { name: 'port', description: 'Port (varsayılan 25565)', type: S.Integer, min_value: 1, max_value: 65535 },
       { name: 'kullanici', description: 'Botun oyundaki adı', type: S.String },
       {
@@ -671,6 +672,11 @@ const COMMANDS = [
       { name: 'y', description: 'Sandığın Y koordinatı', type: S.Integer },
       { name: 'z', description: 'Sandığın Z koordinatı', type: S.Integer },
     ],
+  },
+  {
+    name: 'sahip',
+    description: 'Bot oyunda kimin yazdıklarını yapsın: senin Minecraft adın',
+    options: [{ name: 'ad', description: 'Oyundaki adın (örn. xdarkoum). Boş bırakırsan şu anki sahibi gösterir', type: S.String, max_length: 16 }],
   },
   {
     name: 'soyle',
@@ -731,7 +737,7 @@ const COMMANDS = [
   { name: 'yonetim-kur', description: 'Butonlu yönetim panelini kurar (key ver, süre uzat/bitir, canlı süre takibi)', ...SATICI },
 ]
 const SATICI_KOMUTLARI = new Set(COMMANDS.filter((c) => c.default_member_permissions === '0').map((c) => c.name))
-const ODA_KOMUTLARI = new Set(['baslat', 'durdur', 'durum', 'gorev', 'sandik', 'soyle'])
+const ODA_KOMUTLARI = new Set(['baslat', 'sahip', 'durdur', 'durum', 'gorev', 'sandik', 'soyle'])
 
 client.once(Events.ClientReady, async () => {
   console.log(`Discord botu hazır: ${client.user.tag}`)
@@ -882,15 +888,12 @@ async function odaKomutu(i, l) {
     const auth = i.options.getString('hesap') || son.auth || 'offline'
     const version = secilen('surum') || (secilen('host') ? '' : son.version || '')
 
-    if (!host) return i.editReply('İlk seferde sunucu adresini yaz: `/baslat host:oyna.sunucu.com sahip:OyunAdın`')
-    if (!owner) {
-      return i.editReply('Oyundaki adını da yaz: `/baslat sahip:OyunAdın` (bot oyunda sadece senin komutlarını dinler)')
-    }
+    if (!host) return i.editReply('İlk seferde sunucu adresini yaz: `/baslat host:oyna.sunucu.com`')
     if (!HOST_RE.test(host)) return i.editReply('Geçersiz sunucu adresi.')
     if (auth === 'offline' && !USER_RE.test(user)) {
       return i.editReply('Bot adı 3-16 karakter olmalı (harf, rakam, _).')
     }
-    if (!USER_RE.test(owner)) return i.editReply('Sahip adı geçerli bir Minecraft adı olmalı.')
+    if (owner && !USER_RE.test(owner)) return i.editReply('Sahip adı geçerli bir Minecraft adı olmalı (3-16 karakter: harf, rakam, _).')
     if (version && !/^\d+\.\d+(\.\d+)?$/.test(version)) return i.editReply('Sürüm 1.20.4 gibi yazılmalı.')
     // Bekleyen otomatik bağlanma, DNS kontrolü sürerken eski ayarlarla başlamasın
     denemeIptal(uid)
@@ -914,10 +917,42 @@ async function odaKomutu(i, l) {
     depo.guncelle(uid, { son: ayar, calisiyordu: true })
     panelGuncelle()
     adminLog(`▶️ ${l.kullaniciAdi} botu başlattı: ${host}:${port} (${user}, ${auth}). Çalışan: ${yonetici.sayi()}/${ayarlar.maxBot}`)
-    log(l.kanalId, `Başlatılıyor: ${host}:${port} (${user}, ${auth}${version ? ', ' + version : ''}, sahip: ${owner})`)
+    log(l.kanalId, `Başlatılıyor: ${host}:${port} (${user}, ${auth}${version ? ', ' + version : ''}, sahip: ${owner || 'henüz yok'})`)
     return i.editReply(
       `Bot başlatılıyor: **${host}:${port}**. Loglar birazdan bu odaya düşecek.` +
-        (auth === 'microsoft' ? '\nMicrosoft girişi için kod birazdan burada görünecek.' : '')
+        (auth === 'microsoft' ? '\nMicrosoft girişi için kod birazdan burada görünecek.' : '') +
+        (owner
+          ? `\nOyunda **${owner}** oyuncusunun yazdıklarını yapacak. Değiştirmek için: \`/sahip ad:YeniAd\``
+          : '\nBot girince `/sahip ad:OyundakiAdın` yaz: bot oyunda sadece senin yazdıklarını yapar.')
+    )
+  }
+
+  if (i.commandName === 'sahip') {
+    const ad = (i.options.getString('ad') || '').trim()
+    const simdiki = l.son?.owner || ''
+    if (!ad) {
+      return i.reply(
+        simdiki
+          ? `Bot oyunda **${simdiki}** oyuncusunun yazdıklarını yapıyor. Değiştirmek için: \`/sahip ad:YeniAd\``
+          : 'Henüz sahip yok. `/sahip ad:OyundakiAdın` yaz (örn. `/sahip ad:xdarkoum`).'
+      )
+    }
+    if (!USER_RE.test(ad)) return i.reply('Minecraft adı 3-16 karakter olmalı (harf, rakam, _).')
+    depo.guncelle(uid, { son: { ...(l.son || {}), owner: ad } })
+    const nasil = '\nOyunda: `!odun` `!tas` `!farm` `!topla` `!gel` `!dur` `!durum` `!yardim` ya da "Yaren ..." diye konuş.'
+    if (!yonetici.calisiyor(uid)) {
+      return i.reply(`Tamam, sahip: **${ad}**. \`/baslat\` ile bot girince oyunda sadece senin yazdıklarını yapacak.${nasil}`)
+    }
+    await i.deferReply()
+    const r = await yonetici.istek(uid, 'sahip', { ad })
+    if (r.kod !== 200) {
+      return i.editReply(`Bota şu an ulaşamadım (${r.veri?.hata || r.kod}). Ad kaydedildi: bot yeniden başlayınca **${ad}** oyuncusunu dinler.`)
+    }
+    log(l.kanalId, `Sahip değişti: ${ad}`)
+    return i.editReply(
+      `Tamam! Bot artık oyunda sadece **${ad}** oyuncusunun yazdıklarını yapıyor.` +
+        (r.veri.hazir && !r.veri.oyunda ? ' (Seni şu an sunucuda göremiyor; girdiğinde dinler.)' : '') +
+        nasil
     )
   }
 
@@ -941,7 +976,8 @@ async function odaKomutu(i, l) {
       oyun =
         `Görev: ${s.aktif_gorev || 'yok'}${s.otonom ? ' (otonom)' : ''}` +
         ` | Can: ${Math.round(s.can)}/20 | Açlık: ${s.aclik}/20 | Boş slot: ${s.bos_slot}` +
-        ` | Konum: ${s.konum.join(', ')}`
+        ` | Konum: ${s.konum.join(', ')}` +
+        `\nSahip: ${s.sahip ? `**${s.sahip}**${s.sahip_gorunuyor ? '' : ' (şu an yakında değil)'}` : 'yok, `/sahip ad:OyunAdın` yaz'}`
     }
     return i.editReply(`Çalışıyor: **${info.host}:${info.port}** (${info.user}, ${info.auth})\n${oyun}`)
   }
@@ -1287,7 +1323,7 @@ async function panelKur(i) {
         '• Key doğruysa sana özel bir oda açılır (sadece sen ve satıcı görür), süren o an başlar.',
         '• Key yanlışsa ya da kullanılmışsa oda açılmaz, nedeni yazılır.',
         '',
-        'Odanda `/baslat host:sunucu.adresi sahip:OyunAdın` yaz. Süren bitince odan kapanır; yeni key girersen ayarlarınla geri gelir.',
+        'Odanda `/baslat host:sunucu.adresi` yaz, bot girince `/sahip ad:OyunAdın` yaz: bot oyunda senin yazdıklarını yapar. Süren bitince odan kapanır; yeni key girersen ayarlarınla geri gelir.',
       ].join('\n')
     )
   const buton = new ActionRowBuilder().addComponents(
