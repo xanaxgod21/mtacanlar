@@ -47,21 +47,26 @@ class BotYonetici extends EventEmitter {
     return path.join(this.veriKlasoru(userId), 'sunucu_sifreleri.json')
   }
 
-  sunucuSifresi(userId, host) {
+  // anahtar sunucu:port: aynı IP'deki başka bir sunucuya bu şifre gitmesin
+  sifreAnahtari(host, port) {
+    return `${String(host || '').toLowerCase()}:${Number(port) || 25565}`
+  }
+
+  sunucuSifresi(userId, host, port) {
     try {
-      return JSON.parse(fs.readFileSync(this.sifreDosyasi(userId), 'utf-8'))[String(host || '').toLowerCase()] || ''
+      return JSON.parse(fs.readFileSync(this.sifreDosyasi(userId), 'utf-8'))[this.sifreAnahtari(host, port)] || ''
     } catch (_) {
       return ''
     }
   }
 
-  sunucuSifresiKaydet(userId, host, sifre) {
+  sunucuSifresiKaydet(userId, host, port, sifre) {
     const dosya = this.sifreDosyasi(userId)
     let hepsi = {}
     try {
       hepsi = JSON.parse(fs.readFileSync(dosya, 'utf-8')) || {}
     } catch (_) {}
-    const anahtar = String(host || '').toLowerCase()
+    const anahtar = this.sifreAnahtari(host, port)
     if (sifre) hepsi[anahtar] = sifre
     else delete hepsi[anahtar]
     fs.mkdirSync(path.dirname(dosya), { recursive: true })
@@ -87,7 +92,7 @@ class BotYonetici extends EventEmitter {
       MC_VERSION: ayar.version || '',
       MC_OWNER: ayar.owner || '',
       MC_YONETILEN: '1', // sahip boşsa bot kimseyi dinlemesin (satıcının mc_sahip adına düşmesin)
-      MC_GIRIS_SIFRE: this.sunucuSifresi(userId, ayar.host), // sunucu /login isterse
+      MC_GIRIS_SIFRE: this.sunucuSifresi(userId, ayar.host, ayar.port), // sunucu /login isterse
       MC_SOHBET: ayar.sohbet === false ? '0' : '1', // oyun sohbeti odaya aktarılsın mı
       MC_VERI_DIR: dir,
       KOMUT_PORT: '0', // HTTP yok, IPC var: 50 bot aynı portu kapmaya çalışmasın

@@ -513,7 +513,8 @@ async function istekIsle(tip, veri) {
       return { kod: 500, veri: { hata: e.message } }
     }
     // giriş komutlarında şifre olur: loga yazma
-    console.log(/^\/(login|l|register|reg|changepassword)\b/i.test(metin) ? '[yaz] (giriş komutu gönderildi)' : `[yaz] ${gizle(metin)}`)
+    // komutlarda şifre/kod olabilir (/login, /giris, /cp, /2fa...): sadece komutun adı yazılır
+    console.log(metin.startsWith('/') ? `[yaz] ${metin.split(' ')[0]} (komut gönderildi)` : `[yaz] ${gizle(metin)}`)
     return { kod: 200, veri: { cevap: 'gönderildi' } }
   }
   if (tip === 'soyle') {
@@ -1638,6 +1639,7 @@ async function farmTask(id) {
     const dolu = await yerAc(id)
     if (dolu) return gorevNotu(id, dolu)
     await gerekirseBosalt(id)
+    await yemekGerekirse() // farm süresiz ve alet almıyor: yemeği burada yer
 
     const positions = bot
       .findBlocks({
@@ -1648,6 +1650,7 @@ async function farmTask(id) {
       .filter((p) => !skipped.has(key(p)))
 
     if (positions.length === 0) {
+      afkKipirda() // ürün beklerken AFK diye atılmasın
       await sleep(5000) // ürünlerin büyümesini bekle
       skipped.clear()
       continue
@@ -1696,10 +1699,23 @@ let girisBekleyen = null // oyuna doğmadan gelen istek: doğunca yapılır
 let girisPenceresi = Date.now() + 3 * 60000 // girişten sonraki ilk dakikalarda dinlenir
 let sifreYokUyarildi = false
 const gizle = (t) => (GIRIS_SIFRE ? String(t).split(GIRIS_SIFRE).join('****') : String(t))
-const KAYIT_RE = /\/(register|reg|kayıt|kayit)\b|kayıt ol|kaydol|kayit ol|please register/i
-const GIRIS_RE = /\/(login|l|giris|giriş)\b|giriş yap|giris yap|please log ?in|log in with/i
-const BASARILI_RE = /başarıyla (giriş|kayıt)|giriş yapıldı|giriş başarılı|kayıt başarılı|başarıyla kayıt|successful(ly)? (logged|registered|login|register)|logged in successfully|login successful|you are now logged/i
-const HATALI_RE = /yanlış şifre|hatalı şifre|şifre yanlış|şifreniz yanlış|wrong password|incorrect password|invalid password/i
+// Mesajlar Türkçe harfleri sadeleştirilip karşılaştırılır: AuthMe'nin Türkçe dili
+// "Yanlis sifre!", "Basariyla kaydoldun!" gibi ASCII yazar, başka eklentiler "ş/ı" ile.
+const sade = (t) =>
+  String(t)
+    .replace(/[İIı]/g, 'i')
+    .toLowerCase()
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+const KAYIT_RE = /\/(register|reg|kayit)\b|kayit ol|kaydol|please register/
+const GIRIS_RE = /\/(login|l|log|giris)\b|giris yap|please log ?in|log in with/
+// "bu ad zaten kayıtlı": kayıt değil giriş gerekir
+const ZATEN_KAYITLI_RE = /zaten kayitli|daha once.*kaydol|already registered/
+const BASARILI_RE = /basariyla (giris|kay)|giris yapildi|giris basarili|kayit basarili|zaten giris|oturuma girisiniz|successful(ly)? (logged|registered|login|register)|logged in successfully|login successful|you are now logged|already logged in|logged-in due to session/
+const HATALI_RE = /yanlis sifre|hatali sifre|sifre yanlis|sifreniz yanlis|wrong password|incorrect password|invalid password/
 
 let girisZamanlayici = null
 function girisKomutu(tur) {
@@ -1725,9 +1741,10 @@ function girisKomutu(tur) {
   console.log(tur === 'kayit' ? '[giris] Sunucu kayıt istedi, şifreyle kayıt oluyorum.' : '[giris] Sunucu giriş istedi, şifreyle giriş yapıyorum.')
 }
 
-bot.on('messagestr', (metin, poz) => {
+bot.on('messagestr', (ham, poz) => {
   // oyuncuların yazdıkları değil, sunucunun mesajları (oyuncu "register" yazınca tetiklenmesin)
   if (poz === 'chat' || girisYapildi || Date.now() > girisPenceresi) return
+  const metin = sade(ham)
   if (HATALI_RE.test(metin)) {
     if (!girisHatali) console.log('[giris] Sunucu şifrenin yanlış olduğunu söyledi! Discord odanda /giris sifre:DOĞRU_ŞİFRE yaz.')
     girisHatali = true
@@ -1738,7 +1755,7 @@ bot.on('messagestr', (metin, poz) => {
     console.log('[giris] Sunucuya giriş yapıldı.')
     return
   }
-  const tur = KAYIT_RE.test(metin) ? 'kayit' : GIRIS_RE.test(metin) ? 'giris' : null
+  const tur = ZATEN_KAYITLI_RE.test(metin) ? 'giris' : KAYIT_RE.test(metin) ? 'kayit' : GIRIS_RE.test(metin) ? 'giris' : null
   if (!tur) return
   if (!GIRIS_SIFRE) {
     if (!sifreYokUyarildi) console.log('[giris] Sunucu şifreyle giriş istiyor: Discord odanda /giris sifre:ŞİFREN yaz.')
@@ -1781,23 +1798,36 @@ function enIyiYemek() {
       .sort((a, b) => (yemekler[b.name].effectiveQuality || 0) - (yemekler[a.name].effectiveQuality || 0))[0] || null
   )
 }
+let yemekBekle = 0 // yiyemezse her blokta tekrar denemesin
 async function yemekGerekirse() {
-  if (yiyor || !acMi() || bot.game?.gameMode === 'creative') return false
+  if (yiyor || !acMi() || bot.game?.gameMode === 'creative' || Date.now() < yemekBekle) return false
   const yemek = enIyiYemek()
   if (!yemek) {
     uyar('yemek-yok', 'Acıktım ama yanımda yemek yok. Envanterime ya da sandığa yemek koy.', 10 * 60000)
     return false
   }
   yiyor = true
+  const oncekiAclik = bot.food
+  const adet = () => bot.inventory.items().filter((i) => i.name === yemek.name).reduce((t, i) => t + i.count, 0)
+  const oncekiAdet = adet()
+  const yedi = () => bot.food > oncekiAclik || adet() < oncekiAdet
   try {
     if (bot.heldItem?.slot !== yemek.slot) await bot.equip(yemek, 'hand')
-    await sureli(bot.consume(), 6000, 'yemek yenemedi (zaman aşımı)')
+    try {
+      await bot.consume()
+    } catch (e) {
+      // mineflayer 2,5 sn sonra vazgeçer ama yavaş sunucuda yeme sürüyor olabilir: bırakma, biraz bekle
+      if (!/timed out/i.test(e.message)) throw e
+      for (let i = 0; i < 35 && !yedi(); i++) await sleep(100)
+      if (!yedi()) throw new Error('yemek yenemedi (zaman aşımı)')
+    }
     console.log(`[yemek] ${yemek.name} yedim (açlık ${bot.food}/20).`)
     return true
   } catch (e) {
     try {
       bot.deactivateItem()
     } catch (_) {}
+    yemekBekle = Date.now() + 60000
     console.log('[yemek] Yiyemedim:', e.message)
     return false
   } finally {
@@ -1809,10 +1839,8 @@ async function yemekGerekirse() {
 // Boştayken sunucu "AFK" diye atmasın: arada etrafa bakar, zıplar, kolunu sallar.
 // Boştayken acıktıysa da burada yer.
 let sonAfk = Date.now()
-setInterval(() => {
-  if (!hazir || currentTask || yiyor) return
-  yemekGerekirse().catch(() => {})
-  if (Date.now() - sonAfk < 40000 + Math.random() * 20000) return
+function afkKipirda() {
+  if (!hazir || yiyor || Date.now() - sonAfk < 40000 + Math.random() * 20000) return
   sonAfk = Date.now()
   try {
     bot.look(Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.6, false).catch(() => {})
@@ -1820,9 +1848,24 @@ setInterval(() => {
     bot.setControlState('jump', true)
     setTimeout(() => bot.setControlState('jump', false), 350)
   } catch (_) {}
+}
+setInterval(() => {
+  if (!hazir || currentTask || yiyor) return
+  yemekGerekirse().catch(() => {})
+  afkKipirda()
 }, 10000).unref()
 
-bot.on('kicked', (r) => console.log('[olay] Sunucudan atıldı:', JSON.stringify(r).slice(0, 300)))
+let sifreReddedildi = false
+bot.on('kicked', (r) => {
+  const metin = JSON.stringify(r)
+  console.log('[olay] Sunucudan atıldı:', gizle(metin).slice(0, 300))
+  // AuthMe varsayılanı: yanlış şifrede mesaj değil atma gelir. Aynı yanlış şifreyle
+  // tekrar tekrar bağlanmasın (sunucu banlayabilir).
+  if (GIRIS_SIFRE && girisDeneme > 0 && !girisYapildi && HATALI_RE.test(sade(metin))) {
+    sifreReddedildi = girisHatali = true
+    console.log('[giris] Sunucu şifrenin yanlış olduğunu söyledi ve attı! Discord odanda /giris sifre:DOĞRU_ŞİFRE yaz, sonra /baslat.')
+  }
+})
 bot.on('error', (e) => {
   console.log('[olay] Hata:', e.message || e)
   // Daha bağlanmadan (ör. Microsoft girişi başarısız) hata olursa 'end' gelmez
@@ -1845,5 +1888,5 @@ bot.on('death', () => {
 })
 bot.on('end', (reason) => {
   console.log('[olay] Bağlantı koptu:', reason)
-  process.exit(0) // discordbot.js kapanışı görsün
+  process.exit(sifreReddedildi ? 4 : 0) // 4 = şifre yanlış: discordbot.js tekrar bağlanmasın
 })

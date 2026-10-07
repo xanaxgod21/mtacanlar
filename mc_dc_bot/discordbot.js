@@ -269,11 +269,17 @@ yonetici.on('kapandi', (userId, { code, signal, elleDurdu, sure }) => {
       }
       return
     }
-    if (code === 3) {
-      // kalıcı hata (yasak ya da olmayan adres): tekrar denemenin anlamı yok
+    if (code === 3 || code === 4) {
+      // kalıcı hata (yasak/olmayan adres ya da yanlış sunucu şifresi): tekrar denemenin anlamı yok,
+      // yanlış şifreyle tekrar tekrar girmek sunucunun botu banlamasına yol açar
       if (l) {
         depo.guncelle(userId, { calisiyordu: false })
-        log(l.kanalId, 'Bu adrese bağlanılamıyor, otomatik bağlanma kapalı. Adresi kontrol edip /baslat yaz.')
+        log(
+          l.kanalId,
+          code === 4
+            ? 'Sunucu şifreyi kabul etmedi, otomatik bağlanma kapalı. /giris sifre:DOĞRU_ŞİFRE yazıp /baslat yaz.'
+            : 'Bu adrese bağlanılamıyor, otomatik bağlanma kapalı. Adresi kontrol edip /baslat yaz.'
+        )
       }
       return
     }
@@ -1054,27 +1060,30 @@ async function odaKomutu(i, l) {
     const sifre = (i.options.getString('sifre') || '').trim()
     const host = l.son?.host
     if (!host) return i.reply(gizli('Önce `/baslat host:sunucu.adresi` ile sunucunu yaz, şifre o sunucu için kaydedilir.'))
-    const kayitli = !!yonetici.sunucuSifresi(uid, host)
+    const port = l.son?.port || 25565
+    const adres = port === 25565 ? host : `${host}:${port}`
+    const kayitli = !!yonetici.sunucuSifresi(uid, host, port)
     if (!sifre) {
       return i.reply(
         gizli(
           kayitli
-            ? `**${host}** için kayıtlı şifre var. Bot sunucu isteyince \`/login\` (ilk seferde \`/register\`) yazar. Değiştirmek için \`/giris sifre:YeniŞifre\`, silmek için \`/giris sifre:sil\`.`
-            : `**${host}** için kayıtlı şifre yok. Sunucu girişte şifre istiyorsa \`/giris sifre:BotunŞifresi\` yaz.`
+            ? `**${adres}** için kayıtlı şifre var. Bot sunucu isteyince \`/login\` (ilk seferde \`/register\`) yazar. Değiştirmek için \`/giris sifre:YeniŞifre\`, silmek için \`/giris sifre:sil\`.`
+            : `**${adres}** için kayıtlı şifre yok. Sunucu girişte şifre istiyorsa \`/giris sifre:BotunŞifresi\` yaz.`
         )
       )
     }
     const sil = sifre.toLowerCase() === 'sil'
     if (!sil && !/^[^\s]{3,64}$/.test(sifre)) return i.reply(gizli('Şifre 3-64 karakter olmalı ve boşluk içermemeli.'))
-    yonetici.sunucuSifresiKaydet(uid, host, sil ? '' : sifre)
+    yonetici.sunucuSifresiKaydet(uid, host, port, sil ? '' : sifre)
     // çalışan bot aynı sunucudaysa hemen uygula
     let ek = ''
-    if (yonetici.calisiyor(uid) && yonetici.bilgi(uid)?.host === host) {
+    const b = yonetici.bilgi(uid)
+    if (yonetici.calisiyor(uid) && b?.host === host && Number(b?.port) === Number(port)) {
       const r = await yonetici.istek(uid, 'giris', { sifre: sil ? '' : sifre })
       if (r.kod === 200 && !sil) ek = r.veri.cevap === 'deneniyor' ? ' Bot şimdi giriş yapmayı deniyor.' : ''
     }
     return i.reply(
-      gizli(sil ? `**${host}** için şifre silindi.` : `Şifre kaydedildi (**${host}**). Bot sunucu isteyince kendisi giriş yapar.${ek} Şifre hiçbir yerde gösterilmez.`)
+      gizli(sil ? `**${adres}** için şifre silindi.` : `Şifre kaydedildi (**${adres}**). Bot sunucu isteyince kendisi giriş yapar.${ek} Şifre hiçbir yerde gösterilmez.`)
     )
   }
 
@@ -1091,7 +1100,8 @@ async function odaKomutu(i, l) {
     const r = await yonetici.istek(uid, 'yaz', { metin: mesaj })
     if (r.kod !== 200) return i.reply(gizli('Yazılamadı: ' + (r.veri?.hata || r.kod)))
     // giriş komutunda şifre olabilir: odaya gösterme
-    if (/^\/(login|l|register|reg|changepassword)\b/i.test(mesaj.trim())) return i.reply(gizli('Gönderildi.'))
+    // komutlarda şifre/kod olabilir (/login, /giris, /kayit, /cp, /2fa...): sadece yazana görünsün
+    if (mesaj.trim().startsWith('/')) return i.reply(gizli('Komut oyunda yazıldı.'))
     return i.reply({ content: `Oyunda yazıldı: ${mesaj}`, allowedMentions: { parse: [] } })
   }
 
@@ -1209,7 +1219,8 @@ async function musteriRolu(userId, ver) {
   if (!musteriRol) return
   try {
     const guild = await client.guilds.fetch(GUILD_ID)
-    const uye = await guild.members.fetch(userId).catch((e) => (e.code === 10007 ? null : Promise.reject(e))) // sunucudan çıkmış
+    // önbellek eski olabilir (rol başka yerden değişmiş): sunucudan güncelini al
+    const uye = await guild.members.fetch({ user: userId, force: true }).catch((e) => (e.code === 10007 ? null : Promise.reject(e))) // sunucudan çıkmış
     if (!uye) return
     const var_ = uye.roles.cache.has(musteriRol.id)
     if (ver && !var_) await uye.roles.add(musteriRol, 'Yaren lisansı aktif')
