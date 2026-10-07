@@ -54,7 +54,7 @@ const { BotYonetici, hedefKontrol } = require('./botyonetici')
 const DISCORD_TOKEN = ayarlar.discordToken    // Developer Portal > Bot > Token
 const GUILD_ID = ayarlar.guildId              // Discord sunucunun ID'si
 const LOG_CHANNEL_ID = ayarlar.logKanalId     // satıcı logu: satışlar, başlatmalar, hatalar
-const KEY_LOG_KANAL_ID = ayarlar.keyLogKanalId // key geçmişi: kim üretti, kim kullandı (boşsa satıcı loguna)
+let KEY_LOG_KANAL_ID = ayarlar.keyLogKanalId // key geçmişi: kim üretti, kim kullandı (boşsa satıcı loguna)
 const ADMIN_ID = ayarlar.discordSahipId       // satıcı (sen): key üretir, her odaya girer
 const YETKILI_ROL_ID = ayarlar.yetkiliRolId   // bu roldekiler de key verip lisans yönetebilir
 const ODA_SILME_SAAT = ayarlar.odaSilmeSaat   // süre bitince oda kaç saat sonra silinsin (0 = hemen)
@@ -503,20 +503,24 @@ async function keyIsle(user, guild, key, kaynak = '') {
       return { ok: false, metin: 'Şu an yeni oda açılamıyor, satıcıya haber ver. Keyin kullanılmadı.' }
     }
     const oncekiAi = depo.aiAktifMi(onceki)
+    const oncekiBitis = onceki?.bitis ?? null // kullan() aynı nesneyi değiştirir: önce oku
     const r = depo.kullan(key, { userId: user.id, kullaniciAdi: user.username })
     if (!r.lisans) {
-      if (r.tip === 'gecersiz') {
-        const s = y && Date.now() - y.ilk < 10 * 60000 ? y : { sayi: 0, ilk: Date.now() }
-        s.sayi++
-        yanlis.set(user.id, s)
-        if (s.sayi === 5) {
-          keyLog('supheli', '⚠️ Çok fazla yanlış key', [
-            ['Deneyen', kim(user)],
-            ['Ne oldu', '10 dakikada 5 yanlış key denedi, 10 dakika bekletiliyor'],
-            ['Nereden', kaynak || '-'],
-          ])
-        }
-      } else if (r.kayit && !(r.tip === 'kullanilmis' && r.kayit.kullanan === user.id)) {
+      // kendi kullandığı keyi tekrar girmek zararsız: sayılmaz, loglanmaz
+      if (r.tip === 'kullanilmis' && r.kayit?.kullanan === user.id) return { ok: false, metin: r.mesaj }
+      // yanlış key, başkasının kullandığı / iptal edilmiş key ve iptal edilen müşteri aynı
+      // sınıra sayılır (10 dakikada 5): biri aynı keyi durmadan girip key logunu doldurmasın
+      const s = y && Date.now() - y.ilk < 10 * 60000 ? y : { sayi: 0, ilk: Date.now() }
+      s.sayi++
+      yanlis.set(user.id, s)
+      if (s.sayi === 5) {
+        keyLog('supheli', '⚠️ Çok fazla yanlış key', [
+          ['Deneyen', kim(user)],
+          ['Ne oldu', '10 dakikada 5 yanlış/geçersiz key denedi, 10 dakika bekletiliyor'],
+          ['Nereden', kaynak || '-'],
+        ])
+      }
+      if (r.kayit) {
         // başkasının kullandığı / iptal edilmiş key ya da iptal edilen müşteri
         keyLog('supheli', '⚠️ Geçersiz key denemesi', [
           ['Deneyen', kim(user)],
@@ -536,6 +540,7 @@ async function keyIsle(user, guild, key, kaynak = '') {
       ['Key', onekYaz(k)],
       ['Süre', `${sureYazi(keySuresi(k))}${k.ai ? '' : ' (AI yok)'}`],
       ['Ne oldu', { yeni: 'yeni lisans açıldı', uzatildi: 'süresi uzatıldı', yeniden: 'lisansı yeniden açıldı' }[r.tip]],
+      ...(r.tip === 'yeniden' && oncekiBitis !== null ? [['Önceki bitiş', zaman(oncekiBitis)]] : []),
       ['Yeni bitiş', r.lisans.bitis === null ? 'süresiz' : zaman(r.lisans.bitis)],
       ['Nereden', kaynak || '-'],
       ['Üreten', k.olusturan ? `<@${k.olusturan}> (${k.olusturanAdi || k.olusturan})` : 'bilinmiyor'],
@@ -1141,7 +1146,7 @@ function keyLog(tur, baslik, alanlar) {
     )
   // sırayla gönder (aynı anda çok olay olunca sıra karışmasın, Discord sınırına takılmasın)
   keyLogSira = keyLogSira.then(async () => {
-    if (!client.isReady()) return
+    if (!client.isReady()) await new Promise((r) => client.once(Events.ClientReady, r)) // giriş bitmeden olanlar kaybolmasın
     for (const id of [KEY_LOG_KANAL_ID, LOG_CHANNEL_ID].filter(Boolean)) {
       try {
         const kanal = await client.channels.fetch(id)
@@ -1196,6 +1201,11 @@ async function keyVerIslem(yapan, u, sure, ai) {
       'Keyin doğruysa sana özel odan açılır ve süren o andan saymaya başlar.',
     ].join('\n')
   )
+  const kayit = depo.keyBul(key)[0]
+  if (kayit) {
+    kayit.dmGitti = gitti // key geçmişinde "DM ile" mi "satıcı iletti" mi doğru görünsün
+    depo.kaydet()
+  }
   adminLog(`🎁 ${etiket(yapan)} → ${etiket(u)}: ${sureYazi(sure)} key ${onek} ${gitti ? 'DM ile gönderildi' : 'üretildi (DM kapalı)'}.`)
   keyLog('ver', '🎁 Key verildi', [
     ['Veren', kim(yapan)],
@@ -1265,6 +1275,7 @@ async function lisansKapat(yapan, u, nasil) {
   panelGuncelle()
   const iptal = nasil === 'iptal'
   const ne = iptal ? 'lisansın satıcı tarafından iptal edildi' : 'lisansının süresi satıcı tarafından bitirildi'
+  const odasiVardi = !!depo.bul(u.id)?.kanalId
   const silindi = await odaSil(depo.bul(u.id), iptal ? 'Lisans iptal edildi' : 'Lisans satıcı tarafından bitirildi')
   if (!silindi) await odayaBildir(depo.bul(u.id), `<@${u.id}> ${ne}, botun durduruldu.`, true)
   await dmGonder(
@@ -1275,7 +1286,7 @@ async function lisansKapat(yapan, u, nasil) {
   keyLog(iptal ? 'iptal' : 'lisans', iptal ? '⛔ Lisans iptal edildi' : '⏹️ Lisans bitirildi', [
     ['Yapan', kim(yapan)],
     ['Müşteri', kim(u)],
-    ['Oda', silindi ? 'silindi' : 'kilitlendi'],
+    ['Oda', silindi ? 'silindi' : odasiVardi ? 'kilitlendi' : 'yok'],
     ...(iptal ? [['Not', 'bir daha key giremez (kaldırmak için süre uzat)', false]] : []),
   ])
   return `${etiket(u)} ${iptal ? 'lisansı iptal edildi' : 'lisansının süresi bitirildi'}${silindi ? ', odası silindi' : ''}.`
@@ -1305,7 +1316,9 @@ function keySorguMetni(keyVeyaOnek) {
     [
       `**${onekYaz(k)}** — ${sureYazi(keySuresi(k))}${k.ai ? '' : ' (AI yok)'} — **${durum[k.durum] || k.durum}**`,
       `Üreten: ${k.olusturan ? `<@${k.olusturan}> (${k.olusturanAdi || k.olusturan})` : 'bilinmiyor'} — ${zaman(k.olusturma)}`,
-      k.alici ? `Verildiği kişi: <@${k.alici}> (DM ile)` : null,
+      k.alici
+        ? `Verildiği kişi: <@${k.alici}>${k.dmGitti === true ? ' (DM ile)' : k.dmGitti === false ? ' (DM kapalıydı, satıcı iletti)' : ''}`
+        : null,
       k.kullanan ? `Kullanan: <@${k.kullanan}> — ${zaman(k.kullanma)}` : null,
       k.durum === 'iptal' ? `İptal eden: ${k.iptalEden ? `<@${k.iptalEden}>` : 'bilinmiyor'}${k.iptalZamani ? ` — ${zaman(k.iptalZamani)}` : ''}` : null,
     ]
@@ -1427,8 +1440,16 @@ try {
 }
 // /panel-kur birden çok kanalda yazıldıysa hepsi key kanalıdır (eski panel metni de "buraya yaz" diyor)
 paneller.keyKanallari = [...new Set([...(paneller.keyKanallari || []), paneller.keyKanalId].filter(Boolean))].filter(
-  (id) => id !== LOG_CHANNEL_ID && id !== KEY_LOG_KANAL_ID
+  (id) => id !== LOG_CHANNEL_ID
 )
+// key_log_kanal_id yanlışlıkla key kanalı yazıldıysa key kanalını kapatma (müşteriler oraya
+// key yazıyor, kapatılırsa keyler herkese açık kalır): key logu satıcı loguna düşsün
+if (KEY_LOG_KANAL_ID && paneller.keyKanallari.includes(KEY_LOG_KANAL_ID)) {
+  const uyari = `⚠️ key_log_kanal_id (${KEY_LOG_KANAL_ID}) müşterilerin key yazdığı key kanalı, key log kanalı olamaz. Key logları satıcı log kanalına gidiyor. ayarlar.json'da key_log_kanal_id'yi sadece senin gördüğün ayrı bir kanal yap.`
+  console.error(uyari)
+  setImmediate(() => adminLog(uyari))
+  KEY_LOG_KANAL_ID = ''
+}
 const keyKanaliMi = (id) => paneller.keyKanallari.includes(id)
 function panelKaydet() {
   try {
@@ -1896,6 +1917,7 @@ async function zamanKontrol() {
     keyLog('lisans', '⌛ Lisans süresi doldu', [
       ['Müşteri', `<@${l.userId}> (${l.kullaniciAdi})`],
       ['Kullandığı keyler', (l.keyler || []).slice(-5).map((k) => `\`${k}…\``).join(', ') || '-'],
+      ['Bitiş', zaman(l.bitis)], // bot kapalıyken dolduysa "Zaman" fark edildiği an olur
     ])
     if (ODA_SILME_SAAT === 0) {
       const silindi = await odaSil(l, 'Lisans süresi doldu')
