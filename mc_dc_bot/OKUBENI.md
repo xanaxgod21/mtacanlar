@@ -7,6 +7,27 @@ hata verir. Müşteri botunu o odadan yönetir. Süreler panelde canlı görün�
 süre bitince oda kendiliğinden silinir. Her müşterinin botu senin makinende
 ayrı çalışır.
 
+## Yenilikler (son sürüm)
+
+- **Sunucuya otomatik giriş:** sunucu girişte `/register` ya da `/login` isterse
+  bot kendisi yazar. Müşteri şifreyi bir kere odasında `/giris sifre:...` ile verir.
+  Şifre yanlışsa bot döngüye girmez, odaya "şifre yanlış" yazar. Şifre hiçbir
+  log'a, kanala ve yedeğe yazılmaz; müşterinin klasöründe sunucu başına durur.
+- **Sohbet köprüsü:** oyun sohbeti müşterinin odasına düşer (`/sohbet` ile
+  kapatır), müşteri `/yaz mesaj:...` ile odadan oyuna yazar (`/komut` da olur).
+- **Otomatik yemek:** bot acıkınca yanındaki en iyi yemeği yer (çürük et, örümcek
+  gözü gibi kötüleri ve altın elmayı yemez). Yemek yoksa oyunda söyler.
+- **AFK koruması:** bot boştayken arada etrafa bakar, zıplar, kolunu sallar;
+  sunucu "AFK" diye atmaz.
+- **Müşteri rolü (`musteri_rol_id`):** key giren herkese otomatik verilir, süresi
+  bitince / iptal edilince alınır. Müşterilere özel kanalları bu rolle açarsın.
+- **Günlük yedek:** bütün müşteri ve key kayıtları her gün `veri/yedekler`
+  klasörüne kopyalanır (son 14 gün) ve sana DM ile gelir. `/yedek` ile istediğin an.
+- **Key logu ve `/key-sorgu`:** kim hangi keyi ne zaman üretti / kullandı (aşağıda).
+- **`/sahip`:** müşteri bot girdikten sonra oyundaki adını yazar, bot sadece onu dinler.
+- **Yönetim paneli ve key kanalı:** butonlarla key ver, süre uzat, bitir; müşteri
+  keyini kanala yazar, bot kontrol edip odasını açar.
+
 ## Kurulum (satıcı, Windows)
 
 1. **Node.js** kur: https://nodejs.org adresinden **LTS** sürümünü indir, hep
@@ -25,6 +46,9 @@ ayrı çalışır.
    - `yetkili_rol_id`: ekibin varsa bu roldekiler de key verip lisans yönetebilir
      (boş = sadece sen). Komutları görmeleri için: Sunucu Ayarları > Entegrasyonlar >
      bot > komutlara bu rolü ekle.
+   - `musteri_rol_id`: key girene otomatik verilecek rol (boş = kapalı). Botun
+     rolü, Sunucu Ayarları > Roller listesinde bu rolün **üstünde** olmalı.
+   - `gunluk_yedek`: `true` ise her gün yedek alınır ve sana DM ile gelir.
    - `oda_silme_saat`: süre bitince müşterinin odası kaç saat sonra silinsin
      (0 = hemen silinir; örneğin 24 yazarsan oda 1 gün kilitli bekler, sonra silinir)
    - `anthropic_api_key`: yapay zeka için (boşsa yapay zeka kapalı)
@@ -124,6 +148,7 @@ başlar**; key beklerken süre yanmaz.
 | `/panel-kur` | Bulunduğun kanalı key kanalı yapar ("Key Gir" butonlu panel). Kanala yazılan her mesaj silinir; senin ve yetkililerin key olmayan mesajları (duyuru) kalır |
 | `/panel-kaldir` | Bulunduğun kanal artık key kanalı olmaz (yanlış kanalda kurduysan) |
 | `/yonetim-kur` | Butonlu yönetim panelini kurar |
+| `/yedek` | Bütün müşteri ve key kayıtlarının yedeğini şimdi alır, dosyaları sana gösterir |
 
 Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
 
@@ -142,10 +167,16 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
    `!farm` `!gel` `!dur` `!durum`, ya da "Yaren biraz odun lazım" gibi konuşur.
    Büyük/küçük harf fark etmez, istediği zaman `/sahip` ile değiştirir; boş
    `/sahip` şu anki sahibi gösterir. Sahip yazılmadıysa bot kimseyi dinlemez.
-4. `/gorev` `/durum` `/soyle` `/sandik` `/durdur` odada; `/bilgi` ve `/odam` her yerde.
-5. Kalan süreyi odada, `/bilgi`'de ve oda başlığında görür (geri sayım). Bitişe
+4. Sunucu girişte şifre istiyorsa (`/login`, `/register`) odasında
+   `/giris sifre:BotunŞifresi` yazar; bot her girişte kendisi yazar (ilk seferde
+   kayıt olur). Boş `/giris` kayıtlı şifre var mı gösterir, `/giris sifre:sil` siler.
+   Şifre her sunucu için ayrı saklanır ve hiçbir yerde gösterilmez.
+5. Oyun sohbeti odasına düşer: `/sohbet durum:kapalı` ile kapatır. `/yaz mesaj:selam`
+   ile bot oyunda yazar (`/yaz mesaj:/warp maden` gibi komut da olur).
+6. `/gorev` `/durum` `/soyle` `/sandik` `/durdur` odada; `/bilgi` ve `/odam` her yerde.
+7. Kalan süreyi odada, `/bilgi`'de ve oda başlığında görür (geri sayım). Bitişe
    1 gün ve 1 saat kala uyarılır.
-6. Süre bitince botu durur, **odası silinir** ve DM ile haber verilir. Yeni key
+8. Süre bitince botu durur, **odası silinir** ve DM ile haber verilir. Yeni key
    girerse odası yeniden açılır; botunun ayarları, sandıkları, deneyimleri kaybolmaz.
    Süresi bitmeden yeni key girerse süre kalan sürenin üstüne eklenir.
 
@@ -167,7 +198,18 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
   (toprak/cobblestone), 16 yemek. Kırılmak üzere aletler (sağlamı varsa) tamir
   için sandığa gider. Zırh, yay gibi eşyalara dokunmaz.
 
+## Yedekten geri yükleme
+
+Bilgisayar bozulur ya da `veri/lisanslar.json` silinirse: botu kapat, yeni kurulumda
+`veri/` klasörüne en son yedekteki `lisanslar.json` (ve varsa `paneller.json`,
+`key_log.txt`) dosyalarını koy (DM'deki dosyaların başındaki tarihi silerek), botu aç.
+Bütün müşteriler, keyler ve kalan süreler geri gelir. Müşterilerin sunucu şifreleri
+yedekte yoktur (güvenlik için); gerekirse `/giris` ile tekrar yazarlar.
+
 ## Bilmen gerekenler
+
+- Bot acıkınca kendisi yer, boştayken AFK'dan atılmasın diye arada hareket eder.
+  Yemek yoksa oyunda "acıktım" der; envanterine ya da sandığa yemek koymak yeter.
 
 - Botlar senin makinende çalışır. Müşteriler `localhost` veya yerel ağ
   adresine bağlatamaz, sadece internetteki sunuculara.

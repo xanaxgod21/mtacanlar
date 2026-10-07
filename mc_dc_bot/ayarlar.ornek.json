@@ -5,6 +5,8 @@
   "key_log_kanal_id": "",
   "discord_sahip_id": "561571565527891985",
   "yetkili_rol_id": "",
+  "musteri_rol_id": "",
+  "gunluk_yedek": true,
   "oda_silme_saat": 0,
   "musteri_kategori_id": "",
   "max_bot": 20,

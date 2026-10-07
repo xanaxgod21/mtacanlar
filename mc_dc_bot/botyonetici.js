@@ -41,7 +41,35 @@ class BotYonetici extends EventEmitter {
     return path.join(this.veriKoku, 'musteriler', String(userId).replace(/[^0-9]/g, '') || 'x')
   }
 
-  // ayar: { host, port, user, auth, version, owner, ai, yerelIzin }
+  // Sunucu giriş şifreleri (/giris): müşterinin klasöründe, sunucu adresi başına.
+  // lisanslar.json'a ve yedeklere girmez, hiçbir loga yazılmaz.
+  sifreDosyasi(userId) {
+    return path.join(this.veriKlasoru(userId), 'sunucu_sifreleri.json')
+  }
+
+  sunucuSifresi(userId, host) {
+    try {
+      return JSON.parse(fs.readFileSync(this.sifreDosyasi(userId), 'utf-8'))[String(host || '').toLowerCase()] || ''
+    } catch (_) {
+      return ''
+    }
+  }
+
+  sunucuSifresiKaydet(userId, host, sifre) {
+    const dosya = this.sifreDosyasi(userId)
+    let hepsi = {}
+    try {
+      hepsi = JSON.parse(fs.readFileSync(dosya, 'utf-8')) || {}
+    } catch (_) {}
+    const anahtar = String(host || '').toLowerCase()
+    if (sifre) hepsi[anahtar] = sifre
+    else delete hepsi[anahtar]
+    fs.mkdirSync(path.dirname(dosya), { recursive: true })
+    fs.writeFileSync(dosya + '.tmp', JSON.stringify(hepsi, null, 2), { encoding: 'utf-8', mode: 0o600 })
+    fs.renameSync(dosya + '.tmp', dosya)
+  }
+
+  // ayar: { host, port, user, auth, version, owner, ai, yerelIzin, sohbet }
   baslat(userId, ayar) {
     if (this.botlar.has(userId)) throw new Error('Botun zaten çalışıyor. Önce /durdur yaz.')
     if (this.botlar.size >= this.maxBot) {
@@ -59,6 +87,8 @@ class BotYonetici extends EventEmitter {
       MC_VERSION: ayar.version || '',
       MC_OWNER: ayar.owner || '',
       MC_YONETILEN: '1', // sahip boşsa bot kimseyi dinlemesin (satıcının mc_sahip adına düşmesin)
+      MC_GIRIS_SIFRE: this.sunucuSifresi(userId, ayar.host), // sunucu /login isterse
+      MC_SOHBET: ayar.sohbet === false ? '0' : '1', // oyun sohbeti odaya aktarılsın mı
       MC_VERI_DIR: dir,
       KOMUT_PORT: '0', // HTTP yok, IPC var: 50 bot aynı portu kapmaya çalışmasın
       AI_KAPALI: aiAcik ? '0' : '1',

@@ -15,6 +15,10 @@
 //   !dur    -> mevcut görevi ve otonom modu durdurur
 //   !durum  -> ne yaptığını, canını, açlığını söyler
 //   Yaren <cümle> -> yapay zekayla serbest konuşma ("Yaren biraz odun lazım")
+//
+// Kendiliğinden yaptıkları: sunucu şifre isterse /login - /register yazar
+// (şifre Discord'dan /giris ile verilir), acıkınca yemek yer, boştayken AFK
+// diye atılmasın diye arada hareket eder, oyun sohbetini müşterinin odasına aktarır.
 
 const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
@@ -130,6 +134,7 @@ bot.once('spawn', () => {
   } else {
     console.log(`[sahip] Oyunda sadece ${OWNER} oyuncusunun yazdıklarını yapıyorum.`)
   }
+  if (girisBekleyen) girisKomutu(girisBekleyen)
   say(`Hazırım! ${YARDIM}`)
 })
 
@@ -475,6 +480,42 @@ async function istekIsle(tip, veri) {
     if (ad && hazir) say(`${ad}, artık senin komutlarını dinliyorum. !yardim yazarsan neler yapabildiğimi söylerim.`)
     return { kod: 200, veri: { cevap: ad, oyunda: !!sahipOyuncu(), hazir } }
   }
+  if (tip === 'giris') {
+    const sifre = String(veri.sifre || '')
+    if (sifre && !SIFRE_RE.test(sifre)) return { kod: 400, veri: { hata: 'geçersiz şifre' } }
+    GIRIS_SIFRE = sifre
+    girisHatali = false
+    girisDeneme = 0
+    girisPenceresi = Date.now() + 90000
+    if (!sifre) {
+      console.log('[giris] Sunucu şifresi silindi.')
+      return { kod: 200, veri: { cevap: 'silindi' } }
+    }
+    console.log('[giris] Sunucu şifresi kaydedildi.')
+    // oyundaysa ve henüz giriş yapılmadıysa hemen dene (sunucu kayıt isterse kayıt olur)
+    if (hazir && !girisYapildi) girisKomutu(girisBekleyen || 'giris')
+    return { kod: 200, veri: { cevap: girisYapildi ? 'zaten giriş yapılmış' : hazir ? 'deneniyor' : 'girince kullanılacak' } }
+  }
+  if (tip === 'sohbet') {
+    SOHBET = !!veri.acik
+    console.log(SOHBET ? '[sohbet] Oyun sohbeti bu odaya aktarılıyor.' : '[sohbet] Oyun sohbeti aktarımı kapatıldı.')
+    return { kod: 200, veri: { cevap: SOHBET ? 'acik' : 'kapali' } }
+  }
+  if (tip === 'yaz') {
+    if (!hazir) return { kod: 409, veri: { hata: 'henüz oyuna girmedim' } }
+    const metin = String(veri.metin || '').replace(/\s+/g, ' ').trim().slice(0, 256)
+    if (!metin) return { kod: 400, veri: { hata: 'boş mesaj' } }
+    if (Date.now() - sonYazma < 1500) return { kod: 429, veri: { hata: 'çok hızlı, biraz bekle' } }
+    sonYazma = Date.now()
+    try {
+      bot.chat(metin)
+    } catch (e) {
+      return { kod: 500, veri: { hata: e.message } }
+    }
+    // giriş komutlarında şifre olur: loga yazma
+    console.log(/^\/(login|l|register|reg|changepassword)\b/i.test(metin) ? '[yaz] (giriş komutu gönderildi)' : `[yaz] ${gizle(metin)}`)
+    return { kod: 200, veri: { cevap: 'gönderildi' } }
+  }
   if (tip === 'soyle') {
     if (!brain.enabled) return { kod: 503, veri: { hata: 'yapay zeka kapalı' } }
     const metin = String(veri.metin || '').trim().slice(0, 500)
@@ -663,6 +704,7 @@ const sandiktaYok = new Map() // alet türü -> sandıklarda en son bulunamadı�
 // envanterde yoksa belirlenen sandıklardan alır. Hiç yoksa elle devam eder.
 // Döner: true = alet elde, false = elle (aletsiz)
 async function equipTool(kind, { sandiktan = true } = {}) {
+  await yemekGerekirse() // görevin arasında, aleti almadan önce
   const ad = ALET_ADI[kind] || kind
   let alet = iyiAlet(kind)
   if (
@@ -698,6 +740,7 @@ async function equipTool(kind, { sandiktan = true } = {}) {
 // bot.unequip('hand') envanterde boş yer yoksa elindekini YERE ATAR; onun
 // yerine boş ya da aletsiz bir hotbar yuvasına geçeriz, hiçbir şey atılmaz.
 async function eliBosalt() {
+  await yemekGerekirse()
   const el = bot.heldItem
   if (!el || !el.maxDurability) return // zaten aletsiz
   const hotbar = bot.inventory.slots.slice(36, 45)
@@ -1639,6 +1682,146 @@ process.on('uncaughtException', (e) => {
   console.error('[satıcı] Beklenmeyen hata:', e.stack)
   process.exit(1)
 })
+// ---------- SUNUCU GİRİŞİ (AuthMe vb.) ----------
+// Crack sunucuların çoğu girişte /register ya da /login ister. Şifre Discord'dan
+// /giris ile verilir (müşterinin klasöründe, sunucu başına durur). Şifre hiçbir
+// loga yazılmaz; sohbette geçerse de **** olarak gösterilir.
+const SIFRE_RE = /^[^\s]{3,64}$/
+let GIRIS_SIFRE = SIFRE_RE.test(process.env.MC_GIRIS_SIFRE || '') ? process.env.MC_GIRIS_SIFRE : ''
+let girisDeneme = 0
+let girisSon = 0
+let girisYapildi = false
+let girisHatali = false
+let girisBekleyen = null // oyuna doğmadan gelen istek: doğunca yapılır
+let girisPenceresi = Date.now() + 3 * 60000 // girişten sonraki ilk dakikalarda dinlenir
+let sifreYokUyarildi = false
+const gizle = (t) => (GIRIS_SIFRE ? String(t).split(GIRIS_SIFRE).join('****') : String(t))
+const KAYIT_RE = /\/(register|reg|kayıt|kayit)\b|kayıt ol|kaydol|kayit ol|please register/i
+const GIRIS_RE = /\/(login|l|giris|giriş)\b|giriş yap|giris yap|please log ?in|log in with/i
+const BASARILI_RE = /başarıyla (giriş|kayıt)|giriş yapıldı|giriş başarılı|kayıt başarılı|başarıyla kayıt|successful(ly)? (logged|registered|login|register)|logged in successfully|login successful|you are now logged/i
+const HATALI_RE = /yanlış şifre|hatalı şifre|şifre yanlış|şifreniz yanlış|wrong password|incorrect password|invalid password/i
+
+let girisZamanlayici = null
+function girisKomutu(tur) {
+  if (!GIRIS_SIFRE) {
+    girisBekleyen = tur // şifre /giris ile gelince doğru komut (kayıt mı giriş mi) yazılsın
+    return
+  }
+  if (girisHatali || girisYapildi || girisDeneme >= 4) return // döngüye girmesin
+  const bekle = 4000 - (Date.now() - girisSon)
+  if (bekle > 0) {
+    // az önce denendi: sunucunun cevabı ("önce kayıt ol" gibi) kaybolmasın, biraz sonra yap
+    girisBekleyen = tur
+    clearTimeout(girisZamanlayici)
+    girisZamanlayici = setTimeout(() => girisBekleyen && girisKomutu(girisBekleyen), bekle + 50)
+    return
+  }
+  girisBekleyen = null
+  girisSon = Date.now()
+  girisDeneme++
+  try {
+    bot.chat(tur === 'kayit' ? `/register ${GIRIS_SIFRE} ${GIRIS_SIFRE}` : `/login ${GIRIS_SIFRE}`)
+  } catch (_) {}
+  console.log(tur === 'kayit' ? '[giris] Sunucu kayıt istedi, şifreyle kayıt oluyorum.' : '[giris] Sunucu giriş istedi, şifreyle giriş yapıyorum.')
+}
+
+bot.on('messagestr', (metin, poz) => {
+  // oyuncuların yazdıkları değil, sunucunun mesajları (oyuncu "register" yazınca tetiklenmesin)
+  if (poz === 'chat' || girisYapildi || Date.now() > girisPenceresi) return
+  if (HATALI_RE.test(metin)) {
+    if (!girisHatali) console.log('[giris] Sunucu şifrenin yanlış olduğunu söyledi! Discord odanda /giris sifre:DOĞRU_ŞİFRE yaz.')
+    girisHatali = true
+    return
+  }
+  if (BASARILI_RE.test(metin)) {
+    girisYapildi = true
+    console.log('[giris] Sunucuya giriş yapıldı.')
+    return
+  }
+  const tur = KAYIT_RE.test(metin) ? 'kayit' : GIRIS_RE.test(metin) ? 'giris' : null
+  if (!tur) return
+  if (!GIRIS_SIFRE) {
+    if (!sifreYokUyarildi) console.log('[giris] Sunucu şifreyle giriş istiyor: Discord odanda /giris sifre:ŞİFREN yaz.')
+    sifreYokUyarildi = true
+    girisBekleyen = tur
+    return
+  }
+  if (!hazir) girisBekleyen = tur
+  else girisKomutu(tur)
+})
+
+// ---------- SOHBET KÖPRÜSÜ ----------
+// Oyundaki sohbet müşterinin Discord odasına düşer ([sohbet] satırları).
+// Discord'dan /sohbet ile kapatılır, /yaz ile odadan oyuna yazılır.
+let SOHBET = process.env.MC_SOHBET !== '0'
+let sonYazma = 0
+bot.on('messagestr', (metin, poz) => {
+  if (!SOHBET || poz === 'game_info') return // aksiyon çubuğu (sürekli değişen yazılar) değil
+  // botun kendi yazdıkları zaten [bot] satırı olarak düşüyor
+  if (sonGonderen && bot.player?.uuid && uuidTemiz(sonGonderen) === uuidTemiz(bot.player.uuid)) return
+  const t = gizle(String(metin).replace(/\s+/g, ' ').trim())
+  if (t) console.log('[sohbet] ' + t.slice(0, 300))
+})
+
+// ---------- YEMEK ----------
+// Acıkınca yanındaki en iyi yemeği yer. Zehirli/kötü yemekleri ve değerli
+// altın elmaları yemez. Görevin ortasında değil, alet alırken ya da boştayken yer.
+const KOTU_YEMEK = new Set([
+  'rotten_flesh', 'spider_eye', 'poisonous_potato', 'pufferfish', 'suspicious_stew',
+  'chorus_fruit', 'chicken', 'golden_apple', 'enchanted_golden_apple',
+])
+let yiyor = false
+const acMi = () => hazir && bot.food !== undefined && (bot.food <= 14 || (bot.health < 14 && bot.food < 18))
+function enIyiYemek() {
+  const yemekler = bot.registry.foodsByName || {}
+  return (
+    bot.inventory
+      .items()
+      .filter((i) => yemekler[i.name] && !KOTU_YEMEK.has(i.name))
+      .sort((a, b) => (yemekler[b.name].effectiveQuality || 0) - (yemekler[a.name].effectiveQuality || 0))[0] || null
+  )
+}
+async function yemekGerekirse() {
+  if (yiyor || !acMi() || bot.game?.gameMode === 'creative') return false
+  const yemek = enIyiYemek()
+  if (!yemek) {
+    uyar('yemek-yok', 'Acıktım ama yanımda yemek yok. Envanterime ya da sandığa yemek koy.', 10 * 60000)
+    return false
+  }
+  yiyor = true
+  try {
+    if (bot.heldItem?.slot !== yemek.slot) await bot.equip(yemek, 'hand')
+    await sureli(bot.consume(), 6000, 'yemek yenemedi (zaman aşımı)')
+    console.log(`[yemek] ${yemek.name} yedim (açlık ${bot.food}/20).`)
+    return true
+  } catch (e) {
+    try {
+      bot.deactivateItem()
+    } catch (_) {}
+    console.log('[yemek] Yiyemedim:', e.message)
+    return false
+  } finally {
+    yiyor = false
+  }
+}
+
+// ---------- AFK KORUMASI ----------
+// Boştayken sunucu "AFK" diye atmasın: arada etrafa bakar, zıplar, kolunu sallar.
+// Boştayken acıktıysa da burada yer.
+let sonAfk = Date.now()
+setInterval(() => {
+  if (!hazir || currentTask || yiyor) return
+  yemekGerekirse().catch(() => {})
+  if (Date.now() - sonAfk < 40000 + Math.random() * 20000) return
+  sonAfk = Date.now()
+  try {
+    bot.look(Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.6, false).catch(() => {})
+    bot.swingArm()
+    bot.setControlState('jump', true)
+    setTimeout(() => bot.setControlState('jump', false), 350)
+  } catch (_) {}
+}, 10000).unref()
+
 bot.on('kicked', (r) => console.log('[olay] Sunucudan atıldı:', JSON.stringify(r).slice(0, 300)))
 bot.on('error', (e) => {
   console.log('[olay] Hata:', e.message || e)

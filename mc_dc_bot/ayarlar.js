@@ -49,6 +49,8 @@ module.exports = {
   keyLogKanalId: al('KEY_LOG_CHANNEL_ID', 'key_log_kanal_id'), // key geçmişi (boşsa satıcı loguna)
   discordSahipId: al('DISCORD_OWNER_ID', 'discord_sahip_id'), // satıcı (admin)
   yetkiliRolId: al('YETKILI_ROL_ID', 'yetkili_rol_id'), // bu roldekiler de key verebilir (boş = sadece sen)
+  musteriRolId: al('MUSTERI_ROL_ID', 'musteri_rol_id'), // key girene verilir, süre bitince alınır (boş = kapalı)
+  gunlukYedek: !['0', 'false', 'hayir', 'hayır'].includes(al('GUNLUK_YEDEK', 'gunluk_yedek', '1').toLowerCase()), // her gün yedek DM'i
   odaSilmeSaat: sayi('ODA_SILME_SAAT', 'oda_silme_saat', 0), // süre bitince oda kaç saat sonra silinsin (0 = hemen)
   musteriKategoriId: al('MUSTERI_KATEGORI_ID', 'musteri_kategori_id'), // boşsa bot açar
   maxBot: sayi('MAX_BOT', 'max_bot', 20), // aynı anda en fazla kaç müşteri botu

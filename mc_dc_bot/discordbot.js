@@ -24,6 +24,7 @@
 
 const fs = require('fs')
 const net = require('net')
+const zlib = require('zlib')
 const path = require('path')
 const {
   Client,
@@ -57,6 +58,7 @@ const LOG_CHANNEL_ID = ayarlar.logKanalId     // satıcı logu: satışlar, baş
 let KEY_LOG_KANAL_ID = ayarlar.keyLogKanalId // key geçmişi: kim üretti, kim kullandı (boşsa satıcı loguna)
 const ADMIN_ID = ayarlar.discordSahipId       // satıcı (sen): key üretir, her odaya girer
 const YETKILI_ROL_ID = ayarlar.yetkiliRolId   // bu roldekiler de key verip lisans yönetebilir
+const MUSTERI_ROL_ID = ayarlar.musteriRolId   // key girene verilir, süre bitince alınır (boş = kapalı)
 const ODA_SILME_SAAT = ayarlar.odaSilmeSaat   // süre bitince oda kaç saat sonra silinsin (0 = hemen)
 const KATEGORI_ID = ayarlar.musteriKategoriId // müşteri odaları bu kategoriye (boşsa bot açar)
 const DEFAULT_BOT_NAME = 'GorevBot'
@@ -118,6 +120,7 @@ function adminMi(i) {
   return roller?.cache ? roller.cache.has(YETKILI_ROL_ID) : Array.isArray(roller) && roller.includes(YETKILI_ROL_ID)
 }
 let yetkiliRol = null // açılışta doğrulanır; yanlış ID oda açmayı bozmasın
+let musteriRol = null // açılışta doğrulanır
 
 // Discord zaman damgası: herkes kendi saatinde görür, "3 gün içinde" kendiliğinden güncellenir
 const zaman = (ms, bicim = 'f') => `<t:${Math.floor(ms / 1000)}:${bicim}>`
@@ -206,6 +209,7 @@ function kayitliBaslat(l) {
     ...l.son,
     yerelIzin: !!(l.son.yerelIzin && net.isIP(l.son.host)), // sadece satıcının yazdığı IP
     ai: depo.aiAktifMi(l),
+    sohbet: !l.sohbetKapali,
   })
   panelGuncelle() // 🟢 ve "Çalışan bot" sayısı
 }
@@ -442,9 +446,13 @@ function hosgeldin(l) {
     '**Başlamak için:**',
     '1. `/baslat host:sunucu.adresi` yaz, bot sunucuya girer.',
     '2. `/sahip ad:OyundakiAdın` yaz (örn. `/sahip ad:xdarkoum`). Bot oyunda sadece senin yazdıklarını yapar.',
+    '3. Sunucu girişte şifre istiyorsa (`/login`, `/register`): `/giris sifre:BotunŞifresi` yaz, bot her girişte kendisi yazar.',
     'Bir kere yazman yeter, sonraki seferlerde sadece `/baslat` yazabilirsin.',
     '',
-    'Diğer komutlar: `/sahip` `/gorev` `/durum` `/sandik` `/soyle` `/durdur` `/bilgi`',
+    'Oyun sohbeti bu odaya düşer (`/sohbet` ile kapatırsın), `/yaz` ile odadan oyuna yazarsın.',
+    'Bot acıkınca yanındaki yemeği kendisi yer, boştayken AFK diye atılmasın diye arada hareket eder.',
+    '',
+    'Diğer komutlar: `/sahip` `/giris` `/sohbet` `/yaz` `/gorev` `/durum` `/sandik` `/soyle` `/durdur` `/bilgi`',
     'Oyun içinde: `!odun` `!tas` `!farm` `!topla` `!bosalt` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş.',
     '**Sandık:** oyunda sandığın dibinde dur ve `!sandik ekle` yaz. Bot envanteri yarı dolunca topladıklarını oraya bırakır, baltası kırılmak üzereyse oradan yenisini alır.',
   ].join('\n')
@@ -535,6 +543,7 @@ async function keyIsle(user, guild, key, kaynak = '') {
     yanlis.delete(user.id)
     panelGuncelle()
     const k = r.kayit
+    musteriRolu(user.id, true)
     keyLog('kullan', '🔑 Key kullanıldı', [
       ['Kullanan', kim(user)],
       ['Key', onekYaz(k)],
@@ -715,6 +724,34 @@ const COMMANDS = [
     options: [{ name: 'ad', description: 'Oyundaki adın (örn. xdarkoum). Boş bırakırsan şu anki sahibi gösterir', type: S.String, max_length: 16 }],
   },
   {
+    name: 'giris',
+    description: 'Sunucu girişte şifre istiyorsa (/login, /register) bot bu şifreyle kendisi girer',
+    options: [
+      { name: 'sifre', description: 'Botun sunucudaki şifresi (boş: durumu gösterir, "sil": siler)', type: S.String, max_length: 64 },
+    ],
+  },
+  {
+    name: 'sohbet',
+    description: 'Oyun sohbeti bu odaya aktarılsın mı',
+    options: [
+      {
+        name: 'durum',
+        description: 'Açık ya da kapalı',
+        type: S.String,
+        required: true,
+        choices: [
+          { name: 'açık', value: 'acik' },
+          { name: 'kapalı', value: 'kapali' },
+        ],
+      },
+    ],
+  },
+  {
+    name: 'yaz',
+    description: 'Bot oyunda bunu yazar (sohbet mesajı ya da /komut)',
+    options: [{ name: 'mesaj', description: 'Ne yazsın?', type: S.String, required: true, max_length: 256 }],
+  },
+  {
     name: 'soyle',
     description: 'Yaren ile konuş (yapay zeka): "biraz odun lazım" gibi',
     options: [{ name: 'metin', description: 'Ne diyorsun?', type: S.String, required: true, max_length: 500 }],
@@ -777,9 +814,10 @@ const COMMANDS = [
   { name: 'panel-kur', description: 'Bu kanalı key kanalı yapar: müşteri keyini buraya yazar ya da butona basar', ...SATICI },
   { name: 'panel-kaldir', description: 'Bu kanal artık key kanalı olmaz (yazılan mesajlar silinmez)', ...SATICI },
   { name: 'yonetim-kur', description: 'Butonlu yönetim panelini kurar (key ver, süre uzat/bitir, canlı süre takibi)', ...SATICI },
+  { name: 'yedek', description: 'Müşteri ve key kayıtlarının yedeğini şimdi alır, sana gönderir', ...SATICI },
 ]
 const SATICI_KOMUTLARI = new Set(COMMANDS.filter((c) => c.default_member_permissions === '0').map((c) => c.name))
-const ODA_KOMUTLARI = new Set(['baslat', 'sahip', 'durdur', 'durum', 'gorev', 'sandik', 'soyle'])
+const ODA_KOMUTLARI = new Set(['baslat', 'sahip', 'giris', 'sohbet', 'yaz', 'durdur', 'durum', 'gorev', 'sandik', 'soyle'])
 
 client.once(Events.ClientReady, async () => {
   console.log(`Discord botu hazır: ${client.user.tag}`)
@@ -799,6 +837,11 @@ client.once(Events.ClientReady, async () => {
             if (kanal) await yetkiliIzni(kanal)
           }
         })().catch(() => {})
+    }
+    if (MUSTERI_ROL_ID) {
+      musteriRol = await guild.roles?.fetch?.(MUSTERI_ROL_ID).catch(() => null)
+      if (!musteriRol) adminLog(`⚠️ musteri_rol_id (${MUSTERI_ROL_ID}) bu sunucuda bulunamadı, müşteri rolü kapalı.`)
+      else rolleriEsitle().catch((e) => console.error('Müşteri rolleri eşitlenemedi:', e.message))
     }
     // Key log kanalı: yoksa satıcı loguna düşer; herkese açıksa uyar
     if (KEY_LOG_KANAL_ID) {
@@ -835,6 +878,7 @@ client.once(Events.ClientReady, async () => {
   birikmisBitti()
   await zamanKontrol().catch((e) => console.error('Süre kontrolü:', e.message))
   panelGuncelle()
+  setTimeout(() => gunlukYedek().catch(() => {}), 60000) // son yedek 1 günden eskiyse
   // Satıcı botu yeniden başlattıysa (VPS yeniden açıldı vb.) çalışan botları geri getir
   const geriGelecek = depo.ozetListe().lisanslar.filter((l) => depo.aktifMi(l) && l.calisiyordu && l.son)
   for (const [n, l] of geriGelecek.entries()) {
@@ -960,7 +1004,7 @@ async function odaKomutu(i, l) {
 
     const ayar = { host, port, user, auth, version, owner, yerelIzin }
     try {
-      yonetici.baslat(uid, { ...ayar, ai: depo.aiAktifMi(l) })
+      yonetici.baslat(uid, { ...ayar, ai: depo.aiAktifMi(l), sohbet: !depo.bul(uid)?.sohbetKapali })
     } catch (e) {
       return i.editReply(e.message)
     }
@@ -1004,6 +1048,51 @@ async function odaKomutu(i, l) {
         (r.veri.hazir && !r.veri.oyunda ? ' (Seni şu an sunucuda göremiyor; girdiğinde dinler.)' : '') +
         nasil
     )
+  }
+
+  if (i.commandName === 'giris') {
+    const sifre = (i.options.getString('sifre') || '').trim()
+    const host = l.son?.host
+    if (!host) return i.reply(gizli('Önce `/baslat host:sunucu.adresi` ile sunucunu yaz, şifre o sunucu için kaydedilir.'))
+    const kayitli = !!yonetici.sunucuSifresi(uid, host)
+    if (!sifre) {
+      return i.reply(
+        gizli(
+          kayitli
+            ? `**${host}** için kayıtlı şifre var. Bot sunucu isteyince \`/login\` (ilk seferde \`/register\`) yazar. Değiştirmek için \`/giris sifre:YeniŞifre\`, silmek için \`/giris sifre:sil\`.`
+            : `**${host}** için kayıtlı şifre yok. Sunucu girişte şifre istiyorsa \`/giris sifre:BotunŞifresi\` yaz.`
+        )
+      )
+    }
+    const sil = sifre.toLowerCase() === 'sil'
+    if (!sil && !/^[^\s]{3,64}$/.test(sifre)) return i.reply(gizli('Şifre 3-64 karakter olmalı ve boşluk içermemeli.'))
+    yonetici.sunucuSifresiKaydet(uid, host, sil ? '' : sifre)
+    // çalışan bot aynı sunucudaysa hemen uygula
+    let ek = ''
+    if (yonetici.calisiyor(uid) && yonetici.bilgi(uid)?.host === host) {
+      const r = await yonetici.istek(uid, 'giris', { sifre: sil ? '' : sifre })
+      if (r.kod === 200 && !sil) ek = r.veri.cevap === 'deneniyor' ? ' Bot şimdi giriş yapmayı deniyor.' : ''
+    }
+    return i.reply(
+      gizli(sil ? `**${host}** için şifre silindi.` : `Şifre kaydedildi (**${host}**). Bot sunucu isteyince kendisi giriş yapar.${ek} Şifre hiçbir yerde gösterilmez.`)
+    )
+  }
+
+  if (i.commandName === 'sohbet') {
+    const acik = i.options.getString('durum') === 'acik'
+    depo.guncelle(uid, { sohbetKapali: !acik })
+    if (yonetici.calisiyor(uid)) await yonetici.istek(uid, 'sohbet', { acik })
+    return i.reply(acik ? 'Oyun sohbeti bu odaya aktarılacak.' : 'Oyun sohbeti artık bu odaya aktarılmayacak.')
+  }
+
+  if (i.commandName === 'yaz') {
+    if (!yonetici.calisiyor(uid)) return i.reply(gizli('Botun çalışmıyor. Önce /baslat yaz.'))
+    const mesaj = i.options.getString('mesaj')
+    const r = await yonetici.istek(uid, 'yaz', { metin: mesaj })
+    if (r.kod !== 200) return i.reply(gizli('Yazılamadı: ' + (r.veri?.hata || r.kod)))
+    // giriş komutunda şifre olabilir: odaya gösterme
+    if (/^\/(login|l|register|reg|changepassword)\b/i.test(mesaj.trim())) return i.reply(gizli('Gönderildi.'))
+    return i.reply({ content: `Oyunda yazıldı: ${mesaj}`, allowedMentions: { parse: [] } })
   }
 
   if (i.commandName === 'durdur') {
@@ -1111,6 +1200,85 @@ async function bilgi(i) {
   if (l.kanalId) satir.push(`Odan: <#${l.kanalId}>`)
   return i.editReply(satir.join('\n'))
 }
+
+// ---------- MÜŞTERİ ROLÜ ----------
+// musteri_rol_id: key girene verilir, süresi bitince / iptal edilince alınır.
+// Bot rolü bu rolün üstünde olmalı ve "Rolleri Yönet" izni olmalı.
+const rolHatasi = { verildi: false }
+async function musteriRolu(userId, ver) {
+  if (!musteriRol) return
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID)
+    const uye = await guild.members.fetch(userId).catch((e) => (e.code === 10007 ? null : Promise.reject(e))) // sunucudan çıkmış
+    if (!uye) return
+    const var_ = uye.roles.cache.has(musteriRol.id)
+    if (ver && !var_) await uye.roles.add(musteriRol, 'Yaren lisansı aktif')
+    if (!ver && var_) await uye.roles.remove(musteriRol, 'Yaren lisansı bitti')
+  } catch (e) {
+    if (!rolHatasi.verildi) {
+      rolHatasi.verildi = true
+      adminLog(`⚠️ Müşteri rolü verilemedi/alınamadı: ${e.message}. Botun rolü müşteri rolünün üstünde olmalı ve "Rolleri Yönet" izni olmalı.`)
+    }
+  }
+}
+// Açılışta: aktif müşterilerde rol olsun, süresi bitenlerde olmasın (bot kapalıyken değişenler)
+async function rolleriEsitle() {
+  for (const l of depo.ozetListe().lisanslar) {
+    await musteriRolu(l.userId, depo.aktifMi(l))
+  }
+}
+
+// ---------- YEDEK ----------
+// lisanslar.json (bütün müşteriler ve keyler), paneller.json ve key_log.txt
+// her gün veri/yedekler klasörüne kopyalanır (son 14 gün) ve sana DM ile gelir.
+// Sunucu şifreleri ve Microsoft girişleri yedeğe girmez.
+const YEDEK_DIR = path.join(VERI_DIR, 'yedekler')
+const YEDEK_DOSYALAR = ['lisanslar.json', 'paneller.json', 'key_log.txt']
+function yedekAl() {
+  const gun = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' }) // 2026-10-07
+  const saat = new Date().toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit' }).replace(':', '')
+  const klasor = path.join(YEDEK_DIR, `${gun}_${saat}`)
+  fs.mkdirSync(klasor, { recursive: true })
+  const ekler = []
+  for (const ad of YEDEK_DOSYALAR) {
+    const kaynak = path.join(VERI_DIR, ad)
+    if (!fs.existsSync(kaynak)) continue
+    const veri = fs.readFileSync(kaynak)
+    fs.writeFileSync(path.join(klasor, ad), veri)
+    // Discord ek sınırı: büyük dosya sıkıştırılarak gider
+    ekler.push(veri.length > 7 * 1024 * 1024 ? { attachment: zlib.gzipSync(veri), name: `${gun}_${ad}.gz` } : { attachment: veri, name: `${gun}_${ad}` })
+  }
+  // eski yedekleri temizle (son 14 kalsın)
+  const eskiler = fs.readdirSync(YEDEK_DIR).filter((a) => /^\d{4}-\d{2}-\d{2}_\d{4}$/.test(a)).sort()
+  for (const a of eskiler.slice(0, Math.max(0, eskiler.length - 14))) fs.rmSync(path.join(YEDEK_DIR, a), { recursive: true, force: true })
+  fs.writeFileSync(path.join(YEDEK_DIR, 'son_yedek.txt'), String(Date.now()))
+  const { lisanslar, keyler } = depo.ozetListe()
+  return { ekler, bilgi: `${gun} ${saat.slice(0, 2)}:${saat.slice(2)}, ${lisanslar.length} müşteri, ${keyler.length} key` }
+}
+function sonYedek() {
+  try {
+    return Number(fs.readFileSync(path.join(YEDEK_DIR, 'son_yedek.txt'), 'utf-8')) || 0
+  } catch (_) {
+    return 0
+  }
+}
+async function gunlukYedek() {
+  if (!ayarlar.gunlukYedek || !client.isReady() || Date.now() - sonYedek() < 24 * SAAT) return
+  try {
+    const { ekler, bilgi } = yedekAl()
+    const gitti = await client.users
+      .fetch(ADMIN_ID)
+      .then((u) => u.send({ content: `🗄️ Günlük Yaren yedeği (${bilgi}). Bilgisayar bozulursa bu dosyaları yeni kurulumda \`veri/\` klasörüne koyman yeterli.`, files: ekler }))
+      .then(
+        () => true,
+        () => false
+      )
+    if (!gitti) adminLog('⚠️ Günlük yedek DM ile gönderilemedi (DM\'lerin kapalı olabilir). Yedek bilgisayarında veri/yedekler klasöründe.')
+  } catch (e) {
+    adminLog('⚠️ Günlük yedek alınamadı: ' + e.message)
+  }
+}
+setInterval(() => gunlukYedek().catch(() => {}), SAAT)
 
 // ---------- KEY LOGU ----------
 // Key ve lisans olayları (kim, hangi key, ne zaman) ayrı kanala embed olarak düşer
@@ -1242,6 +1410,7 @@ async function lisansUzatIslem(guild, yapan, u, sure) {
     }
   }
   adminLog(`⏩ ${etiket(yapan)}: ${etiket(u)} lisansı ${sureYazi(sure)} uzatıldı. Bitiş: ${bitisYazi(l)}`)
+  musteriRolu(u.id, true)
   keyLog('lisans', '⏩ Lisans uzatıldı', [
     ['Yapan', kim(yapan)],
     ['Müşteri', kim(u)],
@@ -1283,6 +1452,7 @@ async function lisansKapat(yapan, u, nasil) {
     `Yaren ${ne}, botun durduruldu${silindi ? ' ve odan kapatıldı' : ''}.` + (iptal ? '' : ' Yeni key girersen odan ayarlarınla geri açılır.')
   )
   adminLog(`${iptal ? '⛔' : '⏹️'} ${etiket(yapan)}: ${etiket(u)} ${iptal ? 'lisansını iptal etti' : 'lisansının süresini bitirdi'}.`)
+  musteriRolu(u.id, false)
   keyLog(iptal ? 'iptal' : 'lisans', iptal ? '⛔ Lisans iptal edildi' : '⏹️ Lisans bitirildi', [
     ['Yapan', kim(yapan)],
     ['Müşteri', kim(u)],
@@ -1420,6 +1590,15 @@ async function saticiKomutu(i) {
     return i.reply(gizli('Bu kanal artık key kanalı değil: yazılanlar silinmez. Eski "Key Gir" panel mesajını kendin silebilirsin.'))
   }
   if (i.commandName === 'yonetim-kur') return yonetimKur(i)
+  if (i.commandName === 'yedek') {
+    await i.deferReply({ flags: MessageFlags.Ephemeral })
+    try {
+      const { ekler, bilgi } = yedekAl()
+      return i.editReply({ content: `🗄️ Yedek alındı (${bilgi}). Dosyalar ekte; ayrıca bilgisayarında \`veri/yedekler\` klasöründe.`, files: ekler })
+    } catch (e) {
+      return i.editReply('Yedek alınamadı: ' + e.message)
+    }
+  }
 }
 
 // ---------- KEY KANALI (müşteri paneli) ----------
@@ -1914,6 +2093,7 @@ async function zamanKontrol() {
     denemeIptal(l.userId)
     yonetici.durdur(l.userId)
     adminLog(`⌛ ${l.kullaniciAdi} (${l.userId}) lisansı doldu.`)
+    musteriRolu(l.userId, false)
     keyLog('lisans', '⌛ Lisans süresi doldu', [
       ['Müşteri', `<@${l.userId}> (${l.kullaniciAdi})`],
       ['Kullandığı keyler', (l.keyler || []).slice(-5).map((k) => `\`${k}…\``).join(', ') || '-'],
