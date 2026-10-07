@@ -102,7 +102,8 @@ class LisansDeposu {
   // ---------- Keyler ----------
   // sure: milisaniye (0 = süresiz); eski kullanım için gun de olur.
   // Açık keyleri döndürür (bir daha gösterilemez).
-  olustur({ sure, gun, adet = 1, ai = true, direkt = false, alici = null, simdi = Date.now() } = {}) {
+  // olusturan: keyi üreten satıcı/yetkili (id ve adı, key geçmişi için)
+  olustur({ sure, gun, adet = 1, ai = true, direkt = false, alici = null, olusturan = null, olusturanAdi = null, simdi = Date.now() } = {}) {
     if (sure === undefined) sure = (gun ?? 30) * GUN
     const yeni = []
     for (let i = 0; i < adet; i++) {
@@ -116,6 +117,8 @@ class LisansDeposu {
         direkt, // satıcı /key-ver ile doğrudan verdi
         alici, // kime verildi (Key Ver), iptal etmek gerekirse bulunsun
         ai: !!ai,
+        olusturan,
+        olusturanAdi,
         olusturma: simdi,
         durum: 'bos', // bos | kullanildi | iptal
         kullanan: null,
@@ -127,8 +130,9 @@ class LisansDeposu {
     return yeni
   }
 
-  // Kullanılmamış keyi iptal eder (tam key ya da "YAREN-AB12" öneki)
-  keyIptal(keyVeyaOnek) {
+  // Kullanılmamış keyi iptal eder (tam key ya da "YAREN-AB12" öneki).
+  // Sonuç: { ok, mesaj, kayit }
+  keyIptalEt(keyVeyaOnek, { yapan = null, yapanAdi = null, simdi = Date.now() } = {}) {
     const t = temizle(keyVeyaOnek)
     let k = this.veri.keyler.find((x) => x.hash === ozet(t))
     // Önekle iptal sadece öneki yazınca ("YAREN-AB12") ve sadece satılmamış keylerde:
@@ -137,11 +141,29 @@ class LisansDeposu {
       const uyan = this.veri.keyler.filter((x) => x.durum === 'bos' && temizle(x.onek) === t)
       if (uyan.length === 1) k = uyan[0]
     }
-    if (!k) return 'Key bulunamadı (önek birden fazla keye uyuyorsa tam keyi yaz).'
-    if (k.durum !== 'bos') return `Bu key zaten ${k.durum === 'iptal' ? 'iptal edilmiş' : 'kullanılmış'}.`
+    if (!k) return { ok: false, mesaj: 'Key bulunamadı (önek birden fazla keye uyuyorsa tam keyi yaz).' }
+    if (k.durum !== 'bos') {
+      return { ok: false, kayit: k, mesaj: `Bu key zaten ${k.durum === 'iptal' ? 'iptal edilmiş' : 'kullanılmış'}.` }
+    }
     k.durum = 'iptal'
+    k.iptalEden = yapan
+    k.iptalEdenAdi = yapanAdi
+    k.iptalZamani = simdi
     this.kaydet()
-    return `${k.onek}… iptal edildi.`
+    return { ok: true, kayit: k, mesaj: `${k.onek}… iptal edildi.` }
+  }
+
+  keyIptal(keyVeyaOnek) {
+    return this.keyIptalEt(keyVeyaOnek).mesaj
+  }
+
+  // Key geçmişi için: tam keyle tek kayıt, "YAREN-AB12" önekiyle uyan bütün kayıtlar
+  keyBul(keyVeyaOnek) {
+    const t = temizle(keyVeyaOnek)
+    const tam = this.veri.keyler.find((x) => x.hash === ozet(t))
+    if (tam) return [tam]
+    if (t.length !== 9) return []
+    return this.veri.keyler.filter((x) => temizle(x.onek) === t)
   }
 
   // ---------- Lisanslar ----------
@@ -171,16 +193,17 @@ class LisansDeposu {
   kullan(key, { userId, kullaniciAdi }, simdi = Date.now()) {
     const k = this.veri.keyler.find((x) => x.hash === ozet(key))
     if (!k) return { tip: 'gecersiz', mesaj: 'Bu key geçersiz. Doğru yazdığından emin ol.' }
-    if (k.durum === 'iptal') return { tip: 'iptal', mesaj: 'Bu key iptal edilmiş.' }
+    if (k.durum === 'iptal') return { tip: 'iptal', kayit: k, mesaj: 'Bu key iptal edilmiş.' }
     if (k.durum === 'kullanildi') {
       return {
         tip: 'kullanilmis',
+        kayit: k,
         mesaj: k.kullanan === userId ? 'Bu keyi zaten kullandın.' : 'Bu key başkası tarafından kullanılmış.',
       }
     }
     const eski = this.bul(userId)
     if (eski && eski.durum === 'iptal') {
-      return { tip: 'yasakli', mesaj: 'Lisansın satıcı tarafından iptal edilmiş, onunla görüş.' }
+      return { tip: 'yasakli', kayit: k, mesaj: 'Lisansın satıcı tarafından iptal edilmiş, onunla görüş.' }
     }
 
     const sure = keySuresi(k)
@@ -236,7 +259,7 @@ class LisansDeposu {
     }
     this.kaydet()
     const ne = { yeni: 'Lisansın açıldı', uzatildi: 'Lisansın uzatıldı', yeniden: 'Lisansın yeniden açıldı' }[tip]
-    return { tip, lisans: l, mesaj: `${ne}. Bitiş: ${bitisYazi(l)}.` }
+    return { tip, lisans: l, kayit: k, mesaj: `${ne}. Bitiş: ${bitisYazi(l)}.` }
   }
 
   kanalAyarla(userId, kanalId) {

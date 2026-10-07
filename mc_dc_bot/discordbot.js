@@ -54,6 +54,7 @@ const { BotYonetici, hedefKontrol } = require('./botyonetici')
 const DISCORD_TOKEN = ayarlar.discordToken    // Developer Portal > Bot > Token
 const GUILD_ID = ayarlar.guildId              // Discord sunucunun ID'si
 const LOG_CHANNEL_ID = ayarlar.logKanalId     // satıcı logu: satışlar, başlatmalar, hatalar
+const KEY_LOG_KANAL_ID = ayarlar.keyLogKanalId // key geçmişi: kim üretti, kim kullandı (boşsa satıcı loguna)
 const ADMIN_ID = ayarlar.discordSahipId       // satıcı (sen): key üretir, her odaya girer
 const YETKILI_ROL_ID = ayarlar.yetkiliRolId   // bu roldekiler de key verip lisans yönetebilir
 const ODA_SILME_SAAT = ayarlar.odaSilmeSaat   // süre bitince oda kaç saat sonra silinsin (0 = hemen)
@@ -484,7 +485,8 @@ const yanlis = new Map() // userId -> { sayi, ilk }: key denemesi sınırı
 // Keyi kontrol eder; doğruysa lisansı açar ve odayı hazırlar.
 // Buton, /key-gir ve key kanalına yazılan mesaj hepsi bunu kullanır.
 // Sonuç: { ok, metin, kanal }
-async function keyIsle(user, guild, key) {
+// kaynak: key logunda "nereden girildi" (Key Gir butonu, /key-gir, key kanalı)
+async function keyIsle(user, guild, key, kaynak = '') {
   const y = yanlis.get(user.id)
   if (y && Date.now() - y.ilk < 10 * 60000 && y.sayi >= 5) {
     return { ok: false, metin: 'Çok fazla yanlış key denedin, 10 dakika sonra tekrar dene.' }
@@ -507,11 +509,39 @@ async function keyIsle(user, guild, key) {
         const s = y && Date.now() - y.ilk < 10 * 60000 ? y : { sayi: 0, ilk: Date.now() }
         s.sayi++
         yanlis.set(user.id, s)
+        if (s.sayi === 5) {
+          keyLog('supheli', '⚠️ Çok fazla yanlış key', [
+            ['Deneyen', kim(user)],
+            ['Ne oldu', '10 dakikada 5 yanlış key denedi, 10 dakika bekletiliyor'],
+            ['Nereden', kaynak || '-'],
+          ])
+        }
+      } else if (r.kayit && !(r.tip === 'kullanilmis' && r.kayit.kullanan === user.id)) {
+        // başkasının kullandığı / iptal edilmiş key ya da iptal edilen müşteri
+        keyLog('supheli', '⚠️ Geçersiz key denemesi', [
+          ['Deneyen', kim(user)],
+          ['Key', onekYaz(r.kayit)],
+          ['Neden', { kullanilmis: 'başkasının kullandığı key', iptal: 'iptal edilmiş key', yasakli: 'lisansı iptal edilmiş kişi' }[r.tip] || r.tip],
+          ...(r.kayit.kullanan ? [['Keyi kullanan', `<@${r.kayit.kullanan}> (${zaman(r.kayit.kullanma)})`]] : []),
+          ['Nereden', kaynak || '-'],
+        ])
       }
       return { ok: false, metin: r.mesaj }
     }
     yanlis.delete(user.id)
     panelGuncelle()
+    const k = r.kayit
+    keyLog('kullan', '🔑 Key kullanıldı', [
+      ['Kullanan', kim(user)],
+      ['Key', onekYaz(k)],
+      ['Süre', `${sureYazi(keySuresi(k))}${k.ai ? '' : ' (AI yok)'}`],
+      ['Ne oldu', { yeni: 'yeni lisans açıldı', uzatildi: 'süresi uzatıldı', yeniden: 'lisansı yeniden açıldı' }[r.tip]],
+      ['Yeni bitiş', r.lisans.bitis === null ? 'süresiz' : zaman(r.lisans.bitis)],
+      ['Nereden', kaynak || '-'],
+      ['Üreten', k.olusturan ? `<@${k.olusturan}> (${k.olusturanAdi || k.olusturan})` : 'bilinmiyor'],
+      ['Üretildiği an', zaman(k.olusturma)],
+      ...(k.alici && k.alici !== user.id ? [['⚠️ Dikkat', `Bu key <@${k.alici}> kişisine verilmişti`, false]] : []),
+    ])
     if (aiDegistiyse(r.lisans, oncekiAi)) log(r.lisans.kanalId, 'Yapay zeka hakkın değişti, bot yeniden başlatılıyor.')
     adminLog(`🔑 ${user.tag} (${user.id}) key kullandı: ${r.tip}. Bitiş: ${bitisYazi(r.lisans)}`)
     let kanal
@@ -545,7 +575,8 @@ async function keyKullan(i, key) {
   await i.deferReply({ flags: MessageFlags.Ephemeral })
   if (i.guildId !== GUILD_ID) return i.editReply('Keyi satıcının Discord sunucusunda girmen lazım.')
   await birikmisHazir
-  return i.editReply((await keyIsle(i.user, i.guild, key)).metin)
+  const kaynak = i.isModalSubmit?.() ? 'Key Gir butonu' : '/key-gir komutu'
+  return i.editReply((await keyIsle(i.user, i.guild, key, kaynak)).metin)
 }
 
 function keyModal() {
@@ -708,6 +739,12 @@ const COMMANDS = [
   },
   { name: 'key-liste', description: 'Keylerin durumu', ...SATICI },
   {
+    name: 'key-sorgu',
+    description: 'Bir keyin geçmişi: kim üretti, kime verildi, kim ne zaman kullandı',
+    ...SATICI,
+    options: [{ name: 'key', description: 'Tam key ya da YAREN-XXXX öneki', type: S.String, required: true, max_length: 40 }],
+  },
+  {
     name: 'key-iptal',
     description: 'Henüz kullanılmamış bir keyi iptal eder',
     ...SATICI,
@@ -757,6 +794,12 @@ client.once(Events.ClientReady, async () => {
             if (kanal) await yetkiliIzni(kanal)
           }
         })().catch(() => {})
+    }
+    // Key log kanalı: yoksa satıcı loguna düşer; herkese açıksa uyar
+    if (KEY_LOG_KANAL_ID) {
+      const kl = await kanalGetir(KEY_LOG_KANAL_ID).catch(() => null)
+      if (!kl) adminLog(`⚠️ key_log_kanal_id (${KEY_LOG_KANAL_ID}) bulunamadı, key logları bu kanala düşecek.`)
+      else if (herkeseAcik(kl, guild)) adminLog('⚠️ Key log kanalını herkes görebiliyor (müşteri adları ve key önekleri orada). Kanalı sadece sana ve yetkililere aç.')
     }
     // Eksik izin varsa key yanmadan önce satıcı bilsin
     const ben = guild.members?.me ?? (await guild.members?.fetchMe?.().catch(() => null))
@@ -1064,13 +1107,66 @@ async function bilgi(i) {
   return i.editReply(satir.join('\n'))
 }
 
+// ---------- KEY LOGU ----------
+// Key ve lisans olayları (kim, hangi key, ne zaman) ayrı kanala embed olarak düşer
+// (key_log_kanal_id; boşsa satıcı log kanalına) ve veri/key_log.txt'ye yazılır.
+// Keyin tamamı asla yazılmaz, sadece öneki (YAREN-AB12…): logu gören biri keyi
+// kullanamasın. Tam key sadece üretildiği an satıcıya gösterilir.
+const KEY_LOG_DOSYA = path.join(VERI_DIR, 'key_log.txt')
+const KEY_LOG_RENK = { uret: 0x3498db, ver: 0x9b59b6, kullan: 0x2ecc71, iptal: 0xe67e22, supheli: 0xe74c3c, lisans: 0x95a5a6 }
+const kim = (u) => `<@${u.id}> (${etiket(u)})`
+const onekYaz = (k) => `\`${k.onek}…\``
+let keyLogSira = Promise.resolve()
+function keyLog(tur, baslik, alanlar) {
+  const simdi = Date.now()
+  try {
+    fs.mkdirSync(VERI_DIR, { recursive: true })
+    const duz = (v) =>
+      String(v)
+        .replace(/<t:(\d+):\w>/g, (_, sn) => new Date(sn * 1000).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' }))
+        .replace(/<@!?(\d+)>/g, '$1')
+        .replace(/[`\n]/g, ' ')
+    const satir = alanlar.map(([ad, deger]) => `${ad}: ${duz(deger)}`).join(' | ')
+    const an = new Date(simdi).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })
+    fs.appendFileSync(KEY_LOG_DOSYA, `[${an}] ${baslik} | ${satir}\n`, 'utf-8')
+  } catch (e) {
+    console.error('key_log.txt yazılamadı:', e.message)
+  }
+  const embed = new EmbedBuilder()
+    .setTitle(baslik)
+    .setColor(KEY_LOG_RENK[tur] ?? 0x95a5a6)
+    .addFields(
+      ...alanlar.map(([name, value, inline = true]) => ({ name, value: String(value || '-').slice(0, 1024), inline })),
+      { name: 'Zaman', value: `${zaman(simdi)} (${zaman(simdi, 'R')})`, inline: false }
+    )
+  // sırayla gönder (aynı anda çok olay olunca sıra karışmasın, Discord sınırına takılmasın)
+  keyLogSira = keyLogSira.then(async () => {
+    if (!client.isReady()) return
+    for (const id of [KEY_LOG_KANAL_ID, LOG_CHANNEL_ID].filter(Boolean)) {
+      try {
+        const kanal = await client.channels.fetch(id)
+        await kanal.send({ embeds: [embed], allowedMentions: { parse: [] } })
+        return
+      } catch (e) {
+        console.error(`Key logu gönderilemedi (${id}):`, e.message) // key log kanalı yoksa satıcı loguna dene
+      }
+    }
+  })
+}
+
 // ---------- SATICI İŞLEMLERİ ----------
 // Hem slash komutları hem yönetim paneli bunları kullanır; hepsi cevap metni döndürür.
 const etiket = (u) => u?.tag || u?.username || u?.id
 const durumYazi = (l) => (depo.aktifMi(l) ? 'aktif' : l.durum === 'iptal' ? 'iptal' : 'süresi dolmuş')
 
 function keyOlusturIslem(yapan, sure, adet, ai) {
-  const keyler = depo.olustur({ sure, adet, ai })
+  const keyler = depo.olustur({ sure, adet, ai, olusturan: yapan.id, olusturanAdi: etiket(yapan) })
+  keyLog('uret', `🆕 ${adet} key üretildi`, [
+    ['Üreten', kim(yapan)],
+    ['Süre', sureYazi(sure)],
+    ['Yapay zeka', ai ? 'dahil' : 'yok'],
+    ['Keyler', keyler.map((k) => `\`${k.slice(0, 10)}…\``).join('\n'), false],
+  ])
   adminLog(`🆕 ${etiket(yapan)}: ${adet} key üretti (${sureYazi(sure)}, AI ${ai ? 'var' : 'yok'}).`)
   panelGuncelle()
   return (
@@ -1086,7 +1182,7 @@ async function keyVerIslem(yapan, u, sure, ai) {
   if (depo.bul(u.id)?.durum === 'iptal') {
     return 'Bu kişinin lisansı iptal edilmiş; key giremez. Önce süre uzatarak iptali kaldır.'
   }
-  const [key] = depo.olustur({ sure, ai, direkt: true, alici: u.id })
+  const [key] = depo.olustur({ sure, ai, direkt: true, alici: u.id, olusturan: yapan.id, olusturanAdi: etiket(yapan) })
   const onek = `\`${key.slice(0, 10)}…\``
   const kanal = paneller.keyKanalId ? ` (<#${paneller.keyKanalId}>)` : ''
   const gitti = await dmGonder(
@@ -1101,6 +1197,14 @@ async function keyVerIslem(yapan, u, sure, ai) {
     ].join('\n')
   )
   adminLog(`🎁 ${etiket(yapan)} → ${etiket(u)}: ${sureYazi(sure)} key ${onek} ${gitti ? 'DM ile gönderildi' : 'üretildi (DM kapalı)'}.`)
+  keyLog('ver', '🎁 Key verildi', [
+    ['Veren', kim(yapan)],
+    ['Alan', kim(u)],
+    ['Key', onek],
+    ['Süre', sureYazi(sure)],
+    ['Yapay zeka', ai ? 'dahil' : 'yok'],
+    ['DM', gitti ? 'gönderildi' : "kapalı, key satıcıya gösterildi"],
+  ])
   panelGuncelle()
   return gitti
     ? `<@${u.id}> kişisine **${sureYazi(sure)}** key (${onek}) DM ile gönderildi. Keyi girdiği an odası açılacak.\nVazgeçersen: Key İptal → ${key.slice(0, 10)}`
@@ -1128,6 +1232,12 @@ async function lisansUzatIslem(guild, yapan, u, sure) {
     }
   }
   adminLog(`⏩ ${etiket(yapan)}: ${etiket(u)} lisansı ${sureYazi(sure)} uzatıldı. Bitiş: ${bitisYazi(l)}`)
+  keyLog('lisans', '⏩ Lisans uzatıldı', [
+    ['Yapan', kim(yapan)],
+    ['Müşteri', kim(u)],
+    ['Eklenen', sureYazi(sure)],
+    ['Yeni bitiş', l.bitis === null ? 'süresiz' : zaman(l.bitis)],
+  ])
   return `${etiket(u)} yeni bitiş: ${bitisDiscord(l)}${kanal ? `\nOdası: <#${kanal.id}>` : ''}`
 }
 
@@ -1162,7 +1272,47 @@ async function lisansKapat(yapan, u, nasil) {
     `Yaren ${ne}, botun durduruldu${silindi ? ' ve odan kapatıldı' : ''}.` + (iptal ? '' : ' Yeni key girersen odan ayarlarınla geri açılır.')
   )
   adminLog(`${iptal ? '⛔' : '⏹️'} ${etiket(yapan)}: ${etiket(u)} ${iptal ? 'lisansını iptal etti' : 'lisansının süresini bitirdi'}.`)
+  keyLog(iptal ? 'iptal' : 'lisans', iptal ? '⛔ Lisans iptal edildi' : '⏹️ Lisans bitirildi', [
+    ['Yapan', kim(yapan)],
+    ['Müşteri', kim(u)],
+    ['Oda', silindi ? 'silindi' : 'kilitlendi'],
+    ...(iptal ? [['Not', 'bir daha key giremez (kaldırmak için süre uzat)', false]] : []),
+  ])
   return `${etiket(u)} ${iptal ? 'lisansı iptal edildi' : 'lisansının süresi bitirildi'}${silindi ? ', odası silindi' : ''}.`
+}
+
+function keyIptalIslem(yapan, keyVeyaOnek) {
+  const r = depo.keyIptalEt(keyVeyaOnek, { yapan: yapan.id, yapanAdi: etiket(yapan) })
+  if (r.ok) {
+    panelGuncelle()
+    keyLog('iptal', '🗑️ Key iptal edildi', [
+      ['İptal eden', kim(yapan)],
+      ['Key', onekYaz(r.kayit)],
+      ['Süre', sureYazi(keySuresi(r.kayit))],
+      ['Üreten', r.kayit.olusturan ? `<@${r.kayit.olusturan}>` : 'bilinmiyor'],
+      ...(r.kayit.alici ? [['Verilmişti', `<@${r.kayit.alici}>`]] : []),
+    ])
+  }
+  return r.mesaj
+}
+
+// Bir keyin bütün geçmişi (/key-sorgu, panelde "Key Sorgula")
+function keySorguMetni(keyVeyaOnek) {
+  const bulunan = depo.keyBul(keyVeyaOnek)
+  if (!bulunan.length) return 'Bu keyi bulamadım. Tam keyi ya da YAREN-XXXX önekini yaz.'
+  const durum = { bos: 'boşta (kullanılmadı)', kullanildi: 'kullanıldı', iptal: 'iptal edildi' }
+  const kayitlar = bulunan.slice(-10).map((k) =>
+    [
+      `**${onekYaz(k)}** — ${sureYazi(keySuresi(k))}${k.ai ? '' : ' (AI yok)'} — **${durum[k.durum] || k.durum}**`,
+      `Üreten: ${k.olusturan ? `<@${k.olusturan}> (${k.olusturanAdi || k.olusturan})` : 'bilinmiyor'} — ${zaman(k.olusturma)}`,
+      k.alici ? `Verildiği kişi: <@${k.alici}> (DM ile)` : null,
+      k.kullanan ? `Kullanan: <@${k.kullanan}> — ${zaman(k.kullanma)}` : null,
+      k.durum === 'iptal' ? `İptal eden: ${k.iptalEden ? `<@${k.iptalEden}>` : 'bilinmiyor'}${k.iptalZamani ? ` — ${zaman(k.iptalZamani)}` : ''}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n')
+  )
+  return sigdir(bulunan.length > 1 ? `Bu öneke uyan ${bulunan.length} key var:` : 'Key geçmişi:', kayitlar.map((x) => x + '\n'))
 }
 
 function keyListeMetni() {
@@ -1230,11 +1380,8 @@ async function saticiKomutu(i) {
 
   if (i.commandName === 'key-liste') return i.reply({ ...gizli(keyListeMetni()), ...sessiz })
 
-  if (i.commandName === 'key-iptal') {
-    const m = depo.keyIptal(i.options.getString('key'))
-    panelGuncelle()
-    return i.reply(gizli(m))
-  }
+  if (i.commandName === 'key-iptal') return i.reply(gizli(keyIptalIslem(i.user, i.options.getString('key'))))
+  if (i.commandName === 'key-sorgu') return i.reply({ ...gizli(keySorguMetni(i.options.getString('key'))), ...sessiz })
 
   if (i.commandName === 'lisanslar') return i.reply({ ...gizli(lisansListeMetni()), ...sessiz })
 
@@ -1280,7 +1427,7 @@ try {
 }
 // /panel-kur birden çok kanalda yazıldıysa hepsi key kanalıdır (eski panel metni de "buraya yaz" diyor)
 paneller.keyKanallari = [...new Set([...(paneller.keyKanallari || []), paneller.keyKanalId].filter(Boolean))].filter(
-  (id) => id !== LOG_CHANNEL_ID
+  (id) => id !== LOG_CHANNEL_ID && id !== KEY_LOG_KANAL_ID
 )
 const keyKanaliMi = (id) => paneller.keyKanallari.includes(id)
 function panelKaydet() {
@@ -1311,7 +1458,9 @@ function herkeseAcik(kanal, guild) {
 }
 
 async function panelKur(i) {
-  if (i.channelId === LOG_CHANNEL_ID) return i.reply(gizli('Log kanalı key kanalı olamaz (oradaki mesajlar silinirdi). Müşterilerin göreceği ayrı bir kanalda yaz.'))
+  if (i.channelId === LOG_CHANNEL_ID || i.channelId === KEY_LOG_KANAL_ID) {
+    return i.reply(gizli('Log kanalı key kanalı olamaz (oradaki mesajlar silinirdi). Müşterilerin göreceği ayrı bir kanalda yaz.'))
+  }
   const embed = new EmbedBuilder()
     .setTitle('Yaren — Minecraft Yardımcı Botu')
     .setColor(0x2ecc71)
@@ -1381,7 +1530,7 @@ async function keyMesaji(m, gecmis = false) {
   if (!gecmis) await birikmisHazir
   if (key) {
     // keyler hiç atlanmaz; yanlış key denemesi sınırı ve işlem kilidi keyIsle'de
-    const r = await keyIsle(m.author, m.guild, key)
+    const r = await keyIsle(m.author, m.guild, key, gecmis ? 'key kanalı (bot kapalıyken yazılmış)' : 'key kanalı')
     await geciciCevap(m.channel, m.author.id, `<@${m.author.id}> ${r.ok ? '✅' : '❌'} ${r.metin}`, r.ok ? 30 : 20)
     if (r.ok) await dmGonder(m.author.id, `Yaren: ${r.metin}`)
     return
@@ -1468,7 +1617,8 @@ function yonetimButonlari() {
       b('ver', 'Key Ver', '🎁', ButtonStyle.Success),
       b('olustur', 'Key Oluştur', '🔑', ButtonStyle.Primary),
       b('uzat', 'Süre Uzat', '⏩', ButtonStyle.Primary),
-      b('bitir', 'Lisans Bitir', '⛔', ButtonStyle.Danger)
+      b('bitir', 'Lisans Bitir', '⛔', ButtonStyle.Danger),
+      b('keysorgu', 'Key Sorgula', '🔎')
     ),
     new ActionRowBuilder().addComponents(
       b('sorgula', 'Kişi Sorgula', '🔍'),
@@ -1615,6 +1765,13 @@ const FORMLAR = {
       )
     ),
   sorgula: () => form('sorgula', 'Kişi Sorgula', kisiSec),
+  keysorgu: () =>
+    form('keysorgu', 'Key Sorgula', (l) =>
+      l
+        .setLabel('Key ya da öneki')
+        .setDescription('Kim üretti, kime verildi, kim ne zaman kullandı')
+        .setTextInputComponent((t) => t.setCustomId('key').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(40))
+    ),
   keyiptal: () =>
     form('keyiptal', 'Key İptal', (l) =>
       l
@@ -1668,11 +1825,8 @@ async function yonetimEtkilesim(i) {
     if (!Number.isInteger(adet) || adet < 1 || adet > 25) return i.reply(gizli('Key sayısı 1 ile 25 arasında olmalı.'))
     return i.reply(gizli(keyOlusturIslem(i.user, s.sure, adet, ai())))
   }
-  if (ne === 'keyiptal') {
-    const m = depo.keyIptal(f.getTextInputValue('key'))
-    panelGuncelle()
-    return i.reply(gizli(m))
-  }
+  if (ne === 'keyiptal') return i.reply(gizli(keyIptalIslem(i.user, f.getTextInputValue('key'))))
+  if (ne === 'keysorgu') return i.reply({ ...gizli(keySorguMetni(f.getTextInputValue('key'))), ...sessiz })
 
   const u = kisi()
   if (!u) return i.reply(gizli('Bir kişi seç.'))
@@ -1739,6 +1893,10 @@ async function zamanKontrol() {
     denemeIptal(l.userId)
     yonetici.durdur(l.userId)
     adminLog(`⌛ ${l.kullaniciAdi} (${l.userId}) lisansı doldu.`)
+    keyLog('lisans', '⌛ Lisans süresi doldu', [
+      ['Müşteri', `<@${l.userId}> (${l.kullaniciAdi})`],
+      ['Kullandığı keyler', (l.keyler || []).slice(-5).map((k) => `\`${k}…\``).join(', ') || '-'],
+    ])
     if (ODA_SILME_SAAT === 0) {
       const silindi = await odaSil(l, 'Lisans süresi doldu')
       if (depo.aktifMi(depo.bul(l.userId))) continue

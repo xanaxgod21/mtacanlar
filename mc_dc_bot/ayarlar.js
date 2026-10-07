@@ -46,6 +46,7 @@ module.exports = {
   discordToken: al('DISCORD_TOKEN', 'discord_token'),
   guildId: al('GUILD_ID', 'guild_id'),
   logKanalId: al('LOG_CHANNEL_ID', 'log_kanal_id'), // satıcı logu (satışlar, hatalar)
+  keyLogKanalId: al('KEY_LOG_CHANNEL_ID', 'key_log_kanal_id'), // key geçmişi (boşsa satıcı loguna)
   discordSahipId: al('DISCORD_OWNER_ID', 'discord_sahip_id'), // satıcı (admin)
   yetkiliRolId: al('YETKILI_ROL_ID', 'yetkili_rol_id'), // bu roldekiler de key verebilir (boş = sadece sen)
   odaSilmeSaat: sayi('ODA_SILME_SAAT', 'oda_silme_saat', 0), // süre bitince oda kaç saat sonra silinsin (0 = hemen)

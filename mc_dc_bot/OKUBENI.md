@@ -17,6 +17,10 @@ ayrı çalışır.
    - `discord_token`: Developer Portal > uygulaman > Bot > **Reset Token**
    - `guild_id`: satış yaptığın Discord sunucusu
    - `log_kanal_id`: satışların, başlatmaların ve hataların düşeceği kanal (sadece sen gör)
+   - `key_log_kanal_id`: **key logu** için ayrı kanal (sadece sen gör). Kim hangi
+     keyi ne zaman üretti, kime verdi, kim ne zaman kullandı, kim iptal etti; lisans
+     uzatma/bitirme/iptal ve süresi dolanlar buraya saatiyle düşer. Boş bırakırsan
+     bunlar `log_kanal_id` kanalına gider. Ayrıca `veri/key_log.txt` dosyasına da yazılır.
    - `discord_sahip_id`: senin Discord ID'n (key üretir, her odayı görürsün)
    - `yetkili_rol_id`: ekibin varsa bu roldekiler de key verip lisans yönetebilir
      (boş = sadece sen). Komutları görmeleri için: Sunucu Ayarları > Entegrasyonlar >
@@ -76,10 +80,29 @@ güncellenir. Butonlar (sadece sen ve yetkili rolü basabilir):
 | 🔑 **Key Oluştur** | Süreyi ve kaç tane olduğunu seçersin, keyler sana gösterilir (bir kez), kendin dağıtırsın |
 | ⏩ **Süre Uzat** | Kişiye süre ekler; süresi bitip odası silindiyse odası geri açılır |
 | ⛔ **Lisans Bitir** | "Süresini şimdi bitir" (yeni key alırsa devam eder) ya da "İptal et" (bir daha key giremez). Onay sorar; botu durur, odası silinir, kişiye DM gider |
-| 🔍 **Kişi Sorgula** | Bir kişinin bitişi, yapay zekası, botu, odası, kullandığı keyler |
+| 🔎 **Key Sorgula** | Bir keyin geçmişi: kim üretti, kime verildi, kim ne zaman kullandı / iptal etti |
+| 🔍 **Kişi Sorgula** | Bir kişinin bitişi, yapay zekası, botu, odası, sahibi, kullandığı keyler |
 | 📋 **Lisanslar** / 🗝️ **Keyler** | Bütün müşteriler / bütün keyler (boşta, kullanılmış, iptal) |
 | 🗑️ **Key İptal** | Henüz kullanılmamış bir keyi iptal eder |
 | 🔄 **Yenile** | Tabloyu hemen günceller |
+
+## Key logu
+
+`key_log_kanal_id` kanalına her olay ayrı bir kart olarak düşer (saat herkesin kendi
+saatinde görünür):
+
+| Kart | Ne zaman |
+|---|---|
+| 🆕 Key üretildi | Key Oluştur: kim, kaç tane, süre, keylerin önekleri |
+| 🎁 Key verildi | Key Ver: veren, alan, önek, DM gitti mi |
+| 🔑 Key kullanıldı | Kim kullandı, hangi key, nereden (kanal/buton/komut), yeni bitiş, keyi kimin ne zaman ürettiği. Key başkasına verilmişse ⚠️ uyarısı |
+| ⚠️ Geçersiz key denemesi | Başkasının kullandığı ya da iptal edilmiş bir keyi deneyen |
+| ⚠️ Çok fazla yanlış key | 10 dakikada 5 yanlış key deneyen (10 dk bekletilir) |
+| 🗑️ Key iptal edildi | İptal eden, hangi key, kime verilmişti |
+| ⏩ ⏹️ ⛔ ⌛ | Lisans uzatıldı / bitirildi / iptal edildi / süresi doldu |
+
+Güvenlik için keyin **tamamı loga yazılmaz**, sadece öneki (`YAREN-AB12…`).
+Logu gören biri keyi kullanamaz; öneki `/key-sorgu` ve Key İptal'de kullanırsın.
 
 ## Satıcı (ve yetkili) komutları
 
@@ -92,6 +115,7 @@ başlar**; key beklerken süre yanmaz.
 | `/key-olustur birim:gün miktar:30 adet:5 ai:true` | Key üretir, sana gösterir (bir kez). `ai:false` = yapay zekasız |
 | `/key-ver kullanici:@ali birim:hafta miktar:2` | Key üretip Ali'ye **DM ile gönderir**. Ali keyi girince odası açılır. DM'i kapalıysa key sana gösterilir |
 | `/key-liste` | Boşta / kullanılmış / iptal keyler ve süreleri |
+| `/key-sorgu key:YAREN-XXXX` | Keyin geçmişi: üreten, verildiği kişi, kullanan, iptal eden ve saatleri |
 | `/key-iptal key:YAREN-XXXX` | Satılmamış bir keyi iptal eder |
 | `/lisanslar` | Müşteriler, kalan süreleri (geri sayımlı), çalışan botlar |
 | `/lisans-uzat kullanici:@ali birim:gün miktar:7` | Süre ekler; süresi bitip odası silindiyse odası geri açılır |
