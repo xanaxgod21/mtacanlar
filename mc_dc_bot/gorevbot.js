@@ -49,6 +49,7 @@ try {
 let OWNER = process.env.MC_YONETILEN === '1' ? String(process.env.MC_OWNER || '').trim() : ayarlar.mcSahip
 const SAHIP_RE = /^[A-Za-z0-9_]{3,16}$/
 const sahipMi = (ad) => !!OWNER && String(ad || '').toLowerCase() === OWNER.toLowerCase()
+const SAHIPSIZ = 'Henüz sahibim yok: Discord odana /sahip ad:OyunAdın yaz.'
 const HOST = process.env.MC_HOST || 'localhost'
 const PORT = parseInt(process.env.MC_PORT || '25565', 10)
 const BOT_NAME = process.env.MC_BOT_NAME || 'GorevBot'
@@ -152,13 +153,37 @@ function say(msg) {
 // ---------- KOMUTLAR ----------
 // Oyundaki sahip (adını farklı büyük/küçük harfle yazmış olabilir)
 function sahipOyuncu() {
-  if (!OWNER) return null
+  if (!OWNER || !bot.players) return null // sunucuya bağlanana kadar oyuncu listesi yok
   const ad = Object.keys(bot.players).find(sahipMi)
   return ad ? bot.players[ad] : null
 }
 
-async function onOwnerMessage(username, message) {
-  if (!sahipMi(username)) return
+// mineflayer gönderenin adını mesaj metninden tahminle çıkarır ("[Rütbe] Ad » mesaj"
+// gibi satırlarda baştaki birkaç karakteri atlar). Biri "/me xdarkoum: !odun" ya da
+// "]xdarkoum: !odun" yazıp sahip gibi görünmesin: mesajı gönderenin UUID'si (varsa)
+// sahibinki olmalı ve satırda sahibin adından önce başka bir oyuncunun adı geçmemeli.
+let sonGonderen = null
+bot.on('message', (_m, _poz, gonderen) => {
+  sonGonderen = gonderen || null
+})
+const uuidTemiz = (u) => String(u || '').replace(/-/g, '').toLowerCase()
+const adKonumu = (satir, ad) =>
+  satir.search(new RegExp(`(?<![A-Za-z0-9_])${ad.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_])`, 'i'))
+function gercekSahipSatiri(satir) {
+  const uuid = uuidTemiz(sahipOyuncu()?.uuid)
+  const gonderen = uuidTemiz(sonGonderen)
+  if (uuid && gonderen && !/^0+$/.test(gonderen) && gonderen !== uuid) return false
+  const yer = adKonumu(satir, OWNER)
+  if (yer < 0) return false
+  return !Object.keys(bot.players || {}).some((ad) => {
+    if (sahipMi(ad)) return false
+    const y = adKonumu(satir, ad)
+    return y >= 0 && y < yer
+  })
+}
+
+async function onOwnerMessage(username, message, _translate, satir) {
+  if (!sahipMi(username) || !gercekSahipSatiri(String(satir ?? ''))) return
   const text = String(message).trim()
   if (text.startsWith('!')) return handleCommand(text.toLowerCase())
   const m = text.match(/^yaren[\s,:!]*(.*)$/i)
@@ -215,6 +240,7 @@ function komut(cmd) {
 }
 
 function comeToOwner() {
+  if (!OWNER) return SAHIPSIZ
   const p = sahipOyuncu()?.entity
   if (!p) return 'Seni göremiyorum, yakın değilsin.'
   const myId = taskId
@@ -746,6 +772,7 @@ function sandikKomutu([islem = 'liste', ...sayilar]) {
     let p = koordinat()
     if (p === 'hata') return 'Koordinatı şöyle yaz: !sandik ekle x y z'
     if (!p) {
+      if (!OWNER) return SAHIPSIZ + ' Ya da sandığın koordinatını yaz.'
       p = sahibeEnYakinSandik()
       if (!p) return 'Yanında sandık göremiyorum. Sandığın dibinde dur ya da !sandik ekle x y z yaz.'
     } else {
@@ -761,6 +788,7 @@ function sandikKomutu([islem = 'liste', ...sayilar]) {
   if (islem === 'sil') {
     let p = koordinat()
     if (p === 'hata') return 'Koordinatı şöyle yaz: !sandik sil x y z'
+    if (!p && !OWNER) return SAHIPSIZ + ' Ya da sandığın koordinatını yaz.'
     if (!p) p = sahibeEnYakinSandik(liste)
     const kalan = p ? liste.filter((q) => q.distanceTo(p) >= 1.5) : liste
     if (kalan.length === liste.length) return 'Silinecek sandığı bulamadım (dibinde dur ya da koordinat yaz).'

@@ -882,7 +882,7 @@ async function odaKomutu(i, l) {
     const son = l.son || {}
     const secilen = (ad) => (i.options.getString(ad) || '').trim()
     const host = secilen('host') || son.host || ''
-    const owner = secilen('sahip') || son.owner || ''
+    let owner = secilen('sahip') || son.owner || ''
     const port = i.options.getInteger('port') ?? (secilen('host') ? 25565 : son.port || 25565)
     const user = secilen('kullanici') || son.user || DEFAULT_BOT_NAME
     const auth = i.options.getString('hesap') || son.auth || 'offline'
@@ -907,6 +907,8 @@ async function odaKomutu(i, l) {
     if (yonetici.calisiyor(uid)) return i.editReply('Botun zaten çalışıyor. Önce /durdur yaz.')
     // adres kontrolü birkaç saniye sürebilir; bu arada lisans dolmuş/iptal edilmiş olabilir
     if (!depo.aktifMi(depo.bul(uid))) return i.editReply('Lisans süren doldu, bot başlatılmadı. Yeni key: /key-gir')
+    // adres kontrolü sürerken /sahip ile ad verilmiş olabilir: eski adla ezme
+    if (!secilen('sahip')) owner = depo.bul(uid).son?.owner || ''
 
     const ayar = { host, port, user, auth, version, owner, yerelIzin }
     try {
@@ -1200,7 +1202,8 @@ function kisiBilgiMetni(userId) {
     `<@${userId}> (${l.kullaniciAdi})`,
     `Lisans: **${durumYazi(l)}** | Bitiş: ${bitisDiscord(l)}`,
     `Yapay zeka: **${aiAcik ? 'açık' : 'kapalı'}**` + (aiAcik && aiBitis && aiBitis !== l.bitis ? ` (bitiş: ${zaman(aiBitis, 'R')})` : ''),
-    `Bot: **${yonetici.calisiyor(userId) ? 'çalışıyor' : 'kapalı'}**` + (l.son ? ` (son sunucu: ${l.son.host}:${l.son.port})` : ''),
+    `Bot: **${yonetici.calisiyor(userId) ? 'çalışıyor' : 'kapalı'}**` + (l.son?.host ? ` (son sunucu: ${l.son.host}:${l.son.port})` : ''),
+    `Oyundaki sahip: ${l.son?.owner ? `**${l.son.owner}**` : 'yok'}`,
     `Oda: ${l.kanalId ? `<#${l.kanalId}>` : 'yok'}`,
     `Kullandığı keyler (${(l.keyler || []).length}): ${(l.keyler || []).length > 20 ? '… ' : ''}${(l.keyler || []).slice(-20).map((k) => `\`${k}…\``).join(', ') || '-'}`,
     `İlk key: ${zaman(l.olusturma)}`,
