@@ -73,7 +73,9 @@ kendi listesiyle değiştirir, o botun komutları silinir.
    Kanalları Gör, Mesaj Gönder, Mesaj Geçmişini Oku, Bağlantı Yerleştir, Tepki
    Ekle, Uygulama Komutlarını Kullan, Thread'lerde Mesaj Gönder, Thread Oluştur,
    Kanalları Yönet, Rolleri Yönet, **Mesajları Yönet** (key kanalına yazılan keyleri
-   silmek için). Bot açılınca eksik izin varsa log kanalına yazar.
+   silmek için). Bot açılınca eksik izin varsa log kanalına yazar. Yönetici
+   vermediysen sadece sana açık kanallara (log, key log) Yaren'i kanal
+   ayarları > İzinler > "Üye veya rol ekle" ile ekle; yoksa bot oraya yazamaz.
    Ayrıca Developer Portal > uygulaman > **Bot** sayfasında **Message Content
    Intent**i aç ve kaydet: müşteri keyini kanala yazarak girebilsin diye. Kapalıysa
    sadece "Key Gir" butonu çalışır (bot açılırken bunu kendisi anlar).
@@ -83,9 +85,10 @@ kendi listesiyle değiştirir, o botun komutları silinir.
 6. Müşterilerin göreceği bir kanal aç (örneğin `#key-gir`) ve orada `/panel-kur`
    yaz. Burası **key kanalı** olur: müşteri keyini buraya yazar (mesajı hemen
    silinir, kimse görmez) ya da "Key Gir" butonuna basar.
-7. Kendi kanalında `/yonetim-kur` yaz: **yönetim paneli** kurulur. Herkese açık bir
-   kanalda yazarsan bot sana (ve yetkililere) özel `#yaren-yonetim` kanalını açıp
-   paneli oraya koyar.
+7. Herkese açık bir kanalda (ör. `#genel`) `/yonetim-kur` yaz: bot sana (ve
+   yetkililere) özel `#yaren-yonetim` kanalını açıp **yönetim panelini** oraya
+   koyar (cevabı sadece sen görürsün). Kendi gizli kanalında yazarsan panel o
+   kanala kurulur; o zaman bot o kanalı görebilmeli. Log kanallarında yazma.
 
 Linux VPS'te: `npm install`, `cp ayarlar.ornek.json ayarlar.json`, `nano ayarlar.json`,
 sonra sürekli çalışsın ve VPS yeniden açılınca kendiliğinden başlasın diye:

@@ -35,8 +35,10 @@ değiştir, tarayıcıya yapıştır, sunucunu seç, "Yetkilendir":
 
 https://discord.com/oauth2/authorize?client_id=UYGULAMA_ID&scope=bot+applications.commands&permissions=8
 
-(permissions=8 = Yönetici. Yönetici vermek istemezsen sonundaki 8 yerine
- 380373167184 yaz: botun kullandığı izinlerin hepsi tam o kadar.)
+permissions=8 = Yönetici. EN KOLAYI BU, aşağıdaki adımlar buna göre.
+(Yönetici vermek istemezsen sonundaki 8 yerine 380373167184 yaz: botun
+ kullandığı izinlerin hepsi o kadar. O zaman 3. adımdaki gizli kanallara
+ Yaren'i elle eklemen gerekir, aşağıda yazıyor.)
 
 
 3) ID'LERİ KOPYALA
@@ -55,13 +57,21 @@ Artık sağ tıklayınca en altta "... ID'sini Kopyala" çıkar:
  - #yaren-key-log  (kim hangi keyi ne zaman üretti / kullandı)
 İstersen bir "Müşteri" rolü aç.
 
+Botu Yönetici (8) OLMADAN davet ettiysen: bu iki kanalın ayarlarında
+İzinler > "Üye veya rol ekle" ile Yaren'i de ekle. Eklemezsen bot bu
+kanalları göremez, loglar düşmez.
+
 
 4) PROGRAMI KUR
 ---------------
  a. Zip'i bir klasöre çıkar (ör. C:\Yaren). Zip'in içinden çalıştırma.
  b. https://nodejs.org > "LTS" sürümünü indir, hep "Next" diyerek kur.
- c. Klasördeki "kur.bat" dosyasına çift tıkla. Paketleri indirir ve
-    ayarlar.json dosyasını Not Defteri'nde açar.
+ c. Çıkardığın klasörü aç, içindeki "MC_DC_BOT" klasörüne gir (kur.bat,
+    baslat.bat ve ayarlar.json hep burada). "kur.bat" dosyasına çift tıkla
+    (dosya uzantıları gizliyse adı sadece "kur" görünür). Paketleri indirir
+    ve ayarlar.json dosyasını Not Defteri'nde açar.
+    Mavi "Windows kişisel bilgisayarınızı korudu" penceresi çıkarsa:
+    "Ek bilgi" > "Yine de çalıştır". "Güvenlik Uyarısı" çıkarsa: "Çalıştır".
 
 
 5) AYARLAR.JSON'U DOLDUR
@@ -99,7 +109,7 @@ sürükle, kaydet. Altta kalırsa bot müşteriye rol veremez.
 7) BAŞLAT
 ---------
 "baslat.bat" dosyasına çift tıkla. Siyah pencerede
-    Discord botu hazır: Yaren#1234
+    Discord botu hazır: Yaren#1234   (sayılar farklı olabilir)
 yazısını görünce bot bağlandı demektir. #yaren-log kanalına
 "Bot açıldı" mesajı düşer. Pencere açık kaldığı sürece bot çalışır;
 bilgisayar kapanınca bot da kapanır (7/24 için VPS, bkz. OKUBENI.md).
@@ -111,25 +121,38 @@ bilgisayar kapanınca bot da kapanır (7/24 için VPS, bkz. OKUBENI.md).
         /panel-kur
     Burası key kanalı olur: müşteri keyini buraya yazar ya da
     "Key Gir" butonuna basar.
- b. Sadece senin gördüğün bir kanalda yaz:
+ b. Herkese açık bir kanalda (ör. #genel) yaz:
         /yonetim-kur
-    Butonlu yönetim paneli kurulur (key ver, süre uzat/bitir, canlı süreler).
+    Cevabı sadece sen görürsün. Bot sana (ve yetkililere) özel
+    #yaren-yonetim kanalını kendisi açar, butonlu yönetim panelini oraya
+    kurar (key ver, süre uzat/bitir, canlı süreler). Log kanallarında yazma.
 
 
 9) DENE
 -------
- a. Yönetim panelinde "Key Oluştur" > 1 saat > oluştur. Key ekranda çıkar.
+ a. #yaren-yonetim'deki panelde "Key Oluştur" butonuna bas. Açılan formda
+    "Süre birimi" listesinden "saat"i seç, "Kaç saat / gün / hafta / ay?"
+    kutusuna 1 yaz, diğerlerine dokunma, "Gönder"e bas. Key sadece senin
+    gördüğün bir mesajda çıkar: HEMEN KOPYALA, bir daha gösterilmez.
  b. Başka bir hesapla (ya da kendinle) #key-gir kanalına keyi yaz.
-    Bot "Odan açıldı" der, özel oda açılır.
+    Yazdığın mesaj hemen silinir (key başkası görmesin diye). Bot
+    "✅ Lisansın açıldı. Bitiş: ... Odan: #yaren-..." diye cevap verir
+    (bu cevap 30 sn sonra silinir; DM'lerin açıksa aynısı özelden de gelir)
+    ve sana özel oda açılır.
  c. Odada:  /baslat host:sunucu.adresi.com
+    (Sunucu premium / orijinal hesap istiyorsa: hesap:microsoft seç.)
     Bot oyuna girince:  /sahip ad:OyundakiAdın
-    Oyunda sohbete "!farm" ya da "gel" yaz, bot yapsın.
+    Oyunda sohbete "!farm" ya da "!gel" yaz (başında ! olmalı), bot yapsın.
+    Bot sadece /sahip ile verdiğin isimle yazılanları dinler.
 
 
 SORUN ÇIKARSA (siyah pencerede ya da #yaren-log'da yazan)
 ---------------------------------------------------------
  "ayarlar.json içinde eksik: ..."
-     -> Yazan alan boş kalmış. ayarlar.json'u açıp doldur.
+     -> Yazan alan boş kalmış ya da token yerinde hâlâ BURAYA_... yazıyor.
+        ayarlar.json'u açıp doldur. Bu satırın üstünde "ayarlar.json bozuk,
+        okunamadı" da yazıyorsa alanlar boş değildir, dosya bozuktur: bir
+        alttaki maddeye bak.
  "ayarlar.json bozuk, okunamadı"
      -> Bir tırnak ya da virgül silinmiş. ayarlar.ornek.json ile karşılaştır.
  "Discord girişi başarısız (token yanlış olabilir)"
@@ -140,12 +163,28 @@ SORUN ÇIKARSA (siyah pencerede ya da #yaren-log'da yazan)
  "Botun Discord izinleri eksik: ..."
      -> Adım 2'deki linkle botu yeniden davet et ya da Yaren rolüne
         yazan izinleri ver.
+ "Log gönderilemedi (...): Missing Access" ya da "Unknown Channel"
+     -> Bot log kanalına yazamıyor. Ya log_kanal_id yanlış (dosyada önceden
+        dolu gelen eski bir ID kalmış olabilir) ya da kanal gizli ve bot
+        Yönetici değil. #yaren-log'a sağ tık > "Kanal ID'sini Kopyala" ile
+        ID'yi ayarlar.json'a yeniden yapıştır. Yönetici vermediysen kanal
+        ayarları > İzinler > "Üye veya rol ekle" ile Yaren'i ekle. Sonra
+        siyah pencereyi kapatıp baslat.bat ile yeniden aç.
+ "Bu komut sadece satıcı ve yetkililer içindir."
+     -> discord_sahip_id senin ID'n değil (önceden dolu gelen eski ID
+        kalmış olabilir). Kendi adına sağ tık > "Kullanıcı ID'sini Kopyala",
+        ayarlar.json'a yapıştır, botu yeniden başlat.
  "Message Content Intent kapalı"
      -> Sorun değil, bot çalışır; müşteriler butonla girer. Kanala yazarak
         girsinler istiyorsan adım 1-c'deki anahtarı aç, botu yeniden başlat.
- Komutlar (/panel-kur vb.) görünmüyor
-     -> Discord'u Ctrl+R ile yenile. Hâlâ yoksa botu adım 2'deki linkle
-        yeniden davet et (applications.commands izni lazım).
+ Komutlar (/panel-kur, /yonetim-kur vb.) görünmüyor
+     -> Discord'u Ctrl+R ile yenile. Satıcı komutlarını (/panel-kur,
+        /yonetim-kur, /key-...) sadece sunucu sahibi ve Yönetici yetkisi
+        olanlar görür. Sunucunun sahibi değilsen sunucu sahibinden sana
+        Yönetici yetkisi olan bir rol vermesini iste (ya da Sunucu Ayarları >
+        Entegrasyonlar > Yaren kısmından komutlara seni eklesin). Botu
+        yeniden davet etmek bunu düzeltmez. Siyah pencerede "Slash komutları
+        kaydedilemedi" yazıyorsa yukarıdaki maddeye bak.
  Müşteriye rol verilmiyor
      -> Adım 6: Yaren rolü Müşteri rolünün üstünde olmalı.
 
