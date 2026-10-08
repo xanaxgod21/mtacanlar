@@ -1,135 +1,75 @@
-YAREN - ADIM ADIM KURULUM (Discord'a bağlama)
-=============================================
+YAREN - KURULUM (5 adım, dosya düzenlemek yok)
+==============================================
 
-Yaren kendi başına çalışan bir Discord botu programıdır. "Bota bağlamak",
-Yaren'e bir Discord bot hesabının token'ını vermek demektir. Toplam 10-15 dk.
-
-ÖNCE KARAR: YENİ BOT HESABI AÇ (önerilen)
------------------------------------------
-Yaren için Developer Portal'da YENİ bir uygulama aç. Eski botun aynen
-çalışmaya devam eder, ikisi aynı sunucuda yan yana durur.
-
-Neden? Yaren her açılışta sunucudaki slash komutlarını kendi listesiyle
-değiştirir. Eski botunla AYNI token'ı kullanırsan, eski botun bu sunucuya
-kaydettiği komutlar silinir; eski bot açılınca da Yaren'inkileri siler.
-Eski botunu artık hiç çalıştırmıyorsan onun token'ını da kullanabilirsin.
+Yaren kendi başına çalışan bir Discord botu programıdır. Sen sadece bot
+hesabının token'ını siyah pencereye yapıştırırsın, sunucunda /kur yazarsın.
+Kanalları, rolleri ve panelleri bot kendisi açar. Toplam 5-10 dk.
 
 
 1) BOT HESABINI AÇ
 ------------------
  a. https://discord.com/developers/applications adresine gir.
  b. Sağ üstte "New Application" > ad: Yaren > kutuyu işaretle > "Create".
- c. Soldan "Bot" sekmesi:
-    - "Reset Token" > "Yes, do it!" > çıkan token'ı KOPYALA, bir yere yapıştır.
-      Bu token botun şifresidir, KİMSEYE GÖSTERME, ekran görüntüsü atma.
-    - Aşağıda "MESSAGE CONTENT INTENT" anahtarını AÇ > "Save Changes".
-      (Kapalı kalırsa müşteri keyi kanala yazarak giremez, sadece
-       "Key Gir" butonu çalışır.)
- d. Soldan "General Information" > "APPLICATION ID" yanındaki "Copy".
+ c. Soldan "Bot" sekmesi > "Reset Token" > "Yes, do it!" > "Copy".
+    Bu token botun şifresidir: KİMSEYE GÖSTERME, ekran görüntüsü atma.
+
+ Eski bir botun varsa onun token'ını KULLANMA, Yaren için yeni hesap aç.
+ (Yaren açılırken sunucudaki komutlarını kendi listesiyle değiştirir,
+  aynı token'ı kullanan eski botun komutları silinir.)
 
 
-2) BOTU SUNUCUNA DAVET ET
--------------------------
-Aşağıdaki linkte UYGULAMA_ID yazan yeri 1-d'de kopyaladığın sayıyla
-değiştir, tarayıcıya yapıştır, sunucunu seç, "Yetkilendir":
-
-https://discord.com/oauth2/authorize?client_id=UYGULAMA_ID&scope=bot+applications.commands&permissions=8
-
-permissions=8 = Yönetici. EN KOLAYI BU, aşağıdaki adımlar buna göre.
-(Yönetici vermek istemezsen sonundaki 8 yerine 380373167184 yaz: botun
- kullandığı izinlerin hepsi o kadar. O zaman 3. adımdaki gizli kanallara
- Yaren'i elle eklemen gerekir, aşağıda yazıyor.)
-
-
-3) ID'LERİ KOPYALA
-------------------
-Discord'da: Kullanıcı Ayarları (dişli) > Gelişmiş > "Geliştirici Modu" AÇ.
-Artık sağ tıklayınca en altta "... ID'sini Kopyala" çıkar:
-
- - Sunucu ID      : sunucu adına sağ tık > "Sunucu ID'sini Kopyala"
- - Kanal ID       : kanala sağ tık > "Kanal ID'sini Kopyala"
- - Senin ID'n     : kendi adına sağ tık > "Kullanıcı ID'sini Kopyala"
- - Rol ID         : Sunucu Ayarları > Roller > rolün yanındaki "..." >
-                    "Rol ID'sini Kopyala"
-
-Önceden şunları aç (sadece sen görebil):
- - #yaren-log      (satışlar ve hatalar düşer)
- - #yaren-key-log  (kim hangi keyi ne zaman üretti / kullandı)
-İstersen bir "Müşteri" rolü aç.
-
-Botu Yönetici (8) OLMADAN davet ettiysen: bu iki kanalın ayarlarında
-İzinler > "Üye veya rol ekle" ile Yaren'i de ekle. Eklemezsen bot bu
-kanalları göremez, loglar düşmez.
-
-
-4) PROGRAMI KUR
----------------
+2) PROGRAMI AÇ
+--------------
  a. Zip'i bir klasöre çıkar (ör. C:\Yaren). Zip'in içinden çalıştırma.
  b. https://nodejs.org > "LTS" sürümünü indir, hep "Next" diyerek kur.
- c. Çıkardığın klasörü aç, içindeki "MC_DC_BOT" klasörüne gir (kur.bat,
-    baslat.bat ve ayarlar.json hep burada). "kur.bat" dosyasına çift tıkla
-    (dosya uzantıları gizliyse adı sadece "kur" görünür). Paketleri indirir
-    ve ayarlar.json dosyasını Not Defteri'nde açar.
+ c. Çıkardığın klasördeki "MC_DC_BOT" klasörüne gir, "baslat.bat"
+    dosyasına çift tıkla (uzantılar gizliyse adı "baslat" görünür).
+    İlk açılışta gerekli paketleri indirir (1-2 dk).
     Mavi "Windows kişisel bilgisayarınızı korudu" penceresi çıkarsa:
-    "Ek bilgi" > "Yine de çalıştır". "Güvenlik Uyarısı" çıkarsa: "Çalıştır".
+    "Ek bilgi" > "Yine de çalıştır".
 
 
-5) AYARLAR.JSON'U DOLDUR
-------------------------
-Sadece tırnakların İÇİNİ değiştir. Tırnakları, iki noktaları ve satır
-sonundaki virgülleri SİLME. Örnek (sayılar uydurma):
-
-  "discord_token": "1-c'de kopyaladığın token",
-  "guild_id": "111111111111111111",           <- Sunucu ID
-  "log_kanal_id": "222222222222222222",       <- #yaren-log kanal ID
-  "key_log_kanal_id": "333333333333333333",   <- #yaren-key-log kanal ID
-  "discord_sahip_id": "444444444444444444",   <- Senin ID'n
-  "yetkili_rol_id": "",                       <- ekibin yoksa boş kalsın
-  "musteri_rol_id": "555555555555555555",     <- Müşteri rolü (yoksa "")
-  "gunluk_yedek": true,
-  "oda_silme_saat": 0,
-  "musteri_kategori_id": "",                  <- boş: bot kendisi açar
-  "max_bot": 20,
-  "ai_gunluk_limit": 200,
-  "mc_sahip": "Lyraiv",
-  "anthropic_api_key": "yapay zeka anahtarın (yoksa olduğu gibi bırak)",
-  "ai_model": "claude-haiku-4-5-20251001"
-
-Dosyada guild_id, log_kanal_id, discord_sahip_id önceden dolu gelebilir:
-kendi sunucunun ve senin ID'lerin mi, kontrol et.
-Kaydet (Ctrl+S) ve kapat.
+3) TOKEN'I YAPIŞTIR
+-------------------
+Siyah pencere "Token:" diye sorar. 1-c'de kopyaladığın token'ı yapıştır
+(sağ tık ya da Ctrl+V) ve Enter'a bas.
+ - Doğruysa "Token kaydedildi" der, bir daha sormaz.
+ - Yanlışsa nedenini söyler, tekrar sorar.
+ - Yapıştırdığın token ekranda gizlenir.
+ - Sonradan Developer Portal'da "Reset Token" yaparsan bot bir sonraki
+   açılışta eskisinin geçmediğini anlar, yenisini sorar.
 
 
-6) ROL SIRASI (müşteri rolü kullanıyorsan)
------------------------------------------
-Sunucu Ayarları > Roller: "Yaren" rolünü tutup "Müşteri" rolünün ÜSTÜNE
-sürükle, kaydet. Altta kalırsa bot müşteriye rol veremez.
+4) BOTU SUNUCUNA EKLE
+---------------------
+Token'dan sonra tarayıcı kendiliğinden açılır (açılmazsa siyah penceredeki
+https://discord.com/oauth2/authorize?... linkini kopyalayıp tarayıcıya
+yapıştır). Sunucunu seç > "Devam" > "Yetkilendir".
+Pencerede "Bot ... sunucusuna eklendi. Şimdi orada ... /kur yaz." çıkar.
 
 
-7) BAŞLAT
----------
-"baslat.bat" dosyasına çift tıkla. Siyah pencerede
-    Discord botu hazır: Yaren#1234   (sayılar farklı olabilir)
-yazısını görünce bot bağlandı demektir. #yaren-log kanalına
-"Bot açıldı" mesajı düşer. Pencere açık kaldığı sürece bot çalışır;
-bilgisayar kapanınca bot da kapanır (7/24 için VPS, bkz. OKUBENI.md).
+5) SUNUCUNDA /kur YAZ
+---------------------
+Sunucunda herhangi bir kanala yaz:
+        /kur
+(Sunucu sahibi ya da Yönetici yetkisi olan biri yazmalı. Cevabı sadece sen
+ görürsün.) Bot şunları kendisi açar ve ayarları kaydeder:
+
+ "Yaren Yönetim" kategorisi (sadece sen ve Yaren Yetkili rolü görür):
+   #yaren-log       satışlar, botların açılıp kapanması, hatalar
+   #yaren-key-log   kim hangi keyi ne zaman üretti / verdi / kullandı
+   #yaren-yonetim   butonlu yönetim paneli (key ver, süre uzat/bitir)
+ #key-gir           herkese açık: müşteriler keyini buraya yazar
+ @Yaren Yetkili     sana verilir. Kime verirsen o da log kanallarını ve
+                    paneli görür, key verebilir (ekibin için).
+ @Yaren Müşteri     key girene otomatik verilir, süresi bitince alınır.
+
+Hepsi bu kadar. /kur'u tekrar yazarsan var olanları kullanır, silinmiş bir
+kanal varsa onu yeniden açar.
 
 
-8) PANELLERİ KUR
-----------------
- a. Müşterilerin göreceği bir kanal aç (ör. #key-gir), orada yaz:
-        /panel-kur
-    Burası key kanalı olur: müşteri keyini buraya yazar ya da
-    "Key Gir" butonuna basar.
- b. Herkese açık bir kanalda (ör. #genel) yaz:
-        /yonetim-kur
-    Cevabı sadece sen görürsün. Bot sana (ve yetkililere) özel
-    #yaren-yonetim kanalını kendisi açar, butonlu yönetim panelini oraya
-    kurar (key ver, süre uzat/bitir, canlı süreler). Log kanallarında yazma.
-
-
-9) DENE
--------
+DENE
+----
  a. #yaren-yonetim'deki panelde "Key Oluştur" butonuna bas. Açılan formda
     "Süre birimi" listesinden "saat"i seç, "Kaç saat / gün / hafta / ay?"
     kutusuna 1 yaz, diğerlerine dokunma, "Gönder"e bas. Key sadece senin
@@ -145,47 +85,42 @@ bilgisayar kapanınca bot da kapanır (7/24 için VPS, bkz. OKUBENI.md).
     Oyunda sohbete "!farm" ya da "!gel" yaz (başında ! olmalı), bot yapsın.
     Bot sadece /sahip ile verdiğin isimle yazılanları dinler.
 
+Siyah pencere açık kaldığı sürece bot çalışır; bilgisayar kapanınca bot da
+kapanır. 7/24 için VPS gerekir (bkz. OKUBENI.md).
 
-SORUN ÇIKARSA (siyah pencerede ya da #yaren-log'da yazan)
----------------------------------------------------------
- "ayarlar.json içinde eksik: ..."
-     -> Yazan alan boş kalmış ya da token yerinde hâlâ BURAYA_... yazıyor.
-        ayarlar.json'u açıp doldur. Bu satırın üstünde "ayarlar.json bozuk,
-        okunamadı" da yazıyorsa alanlar boş değildir, dosya bozuktur: bir
-        alttaki maddeye bak.
- "ayarlar.json bozuk, okunamadı"
-     -> Bir tırnak ya da virgül silinmiş. ayarlar.ornek.json ile karşılaştır.
- "Discord girişi başarısız (token yanlış olabilir)"
-     -> Token yanlış/eksik kopyalandı. 1-c'deki gibi Reset Token yapıp
-        yeniden yapıştır.
- "Slash komutları kaydedilemedi ... guild_id doğru mu, bot o sunucuda mı?"
-     -> guild_id yanlış ya da bot sunucuya davet edilmemiş (adım 2).
- "Botun Discord izinleri eksik: ..."
-     -> Adım 2'deki linkle botu yeniden davet et ya da Yaren rolüne
-        yazan izinleri ver.
- "Log gönderilemedi (...): Missing Access" ya da "Unknown Channel"
-     -> Bot log kanalına yazamıyor. Ya log_kanal_id yanlış (dosyada önceden
-        dolu gelen eski bir ID kalmış olabilir) ya da kanal gizli ve bot
-        Yönetici değil. #yaren-log'a sağ tık > "Kanal ID'sini Kopyala" ile
-        ID'yi ayarlar.json'a yeniden yapıştır. Yönetici vermediysen kanal
-        ayarları > İzinler > "Üye veya rol ekle" ile Yaren'i ekle. Sonra
-        siyah pencereyi kapatıp baslat.bat ile yeniden aç.
- "Bu komut sadece satıcı ve yetkililer içindir."
-     -> discord_sahip_id senin ID'n değil (önceden dolu gelen eski ID
-        kalmış olabilir). Kendi adına sağ tık > "Kullanıcı ID'sini Kopyala",
-        ayarlar.json'a yapıştır, botu yeniden başlat.
+
+SORUN ÇIKARSA (siyah pencerede ya da Discord'da yazan)
+-----------------------------------------------------
+ "Bu bir bot token'ına benzemiyor"
+     -> Yanlış şeyi kopyaladın (ör. Application ID ya da Client Secret).
+        Bot sekmesindeki "Reset Token" ile alınanı yapıştır.
+ "Discord bu token'ı kabul etmedi"
+     -> Token eksik kopyalanmış ya da sonradan sıfırlanmış. "Reset Token"
+        yap, yenisini yapıştır.
+ "Discord'a ulaşılamadı"
+     -> İnternet bağlantını kontrol et, token'ı tekrar yapıştır.
+ /kur görünmüyor
+     -> Discord'u Ctrl+R ile yenile. /kur'u sadece sunucu sahibi ve
+        Yönetici yetkisi olanlar görür. Bot sunucuda değilse adım 4.
+ "/kur'u sadece sunucu sahibi ya da Yönetici yetkisi olan biri yazabilir."
+     -> Sunucu sahibine yazdır ya da kendine Yönetici yetkisi olan rol ver.
+ "Botun bu sunucuda izni eksik: ..."
+     -> Botun Yönetici izni yok. Cevaptaki linki aç, "Yetkilendir" de
+        (botu atmana gerek yok), sonra tekrar /kur yaz.
+ "Kurulumu sadece satıcı (ilk /kur yazan kişi) değiştirebilir."
+     -> Kurulumu ilk /kur yazan kişi yaptı; o yazmalı.
+ "Yaren henüz kurulmadı: sunucu sahibi bir kanala /kur yazsın."
+     -> Adım 5'i yap.
+ "... rolü botun rolünden yukarıda, bot bu rolü veremez"
+     -> Sunucu Ayarları > Roller: "Yaren" rolünü tutup en üste yakın
+        sürükle (Yaren Yetkili ve Yaren Müşteri'nin üstüne), kaydet.
  "Message Content Intent kapalı"
-     -> Sorun değil, bot çalışır; müşteriler butonla girer. Kanala yazarak
-        girsinler istiyorsan adım 1-c'deki anahtarı aç, botu yeniden başlat.
- Komutlar (/panel-kur, /yonetim-kur vb.) görünmüyor
-     -> Discord'u Ctrl+R ile yenile. Satıcı komutlarını (/panel-kur,
-        /yonetim-kur, /key-...) sadece sunucu sahibi ve Yönetici yetkisi
-        olanlar görür. Sunucunun sahibi değilsen sunucu sahibinden sana
-        Yönetici yetkisi olan bir rol vermesini iste (ya da Sunucu Ayarları >
-        Entegrasyonlar > Yaren kısmından komutlara seni eklesin). Botu
-        yeniden davet etmek bunu düzeltmez. Siyah pencerede "Slash komutları
-        kaydedilemedi" yazıyorsa yukarıdaki maddeye bak.
- Müşteriye rol verilmiyor
-     -> Adım 6: Yaren rolü Müşteri rolünün üstünde olmalı.
+     -> Sorun değil, bot çalışır; müşteriler "Key Gir" butonuyla girer.
+        Kanala yazarak da girsinler istersen: Developer Portal > Bot >
+        "Message Content Intent" aç > "Save Changes", botu yeniden başlat.
+        (Bot bunu çoğu zaman kendisi açar.)
+ Bot sunucudan atıldıysa
+     -> Adım 4'teki linkle geri ekle; ayarlar durduğu için kaldığı yerden
+        devam eder.
 
 Bütün komutlar ve özellikler: OKUBENI.md

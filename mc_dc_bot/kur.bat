@@ -24,14 +24,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-if not exist ayarlar.json (
-  copy ayarlar.ornek.json ayarlar.json >nul
-  echo.
-  echo ayarlar.json olusturuldu. Simdi Not Defteri acilacak:
-  echo BURAYA_DISCORD_BOT_TOKENI ve BURAYA_ANTHROPIC_ANAHTARI yazan yerlere
-  echo kendi token ve anahtarini yapistir, kaydet ve kapat.
-  notepad ayarlar.json
-)
 echo.
-echo Kurulum bitti. Botu baslatmak icin baslat.bat dosyasini ac.
-pause
+echo Kurulum bitti. Bot simdi aciliyor: token sorarsa yapistir ve Enter'a bas.
+echo.
+call "%~dp0baslat.bat"

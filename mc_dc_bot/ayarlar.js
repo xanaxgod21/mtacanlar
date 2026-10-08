@@ -42,7 +42,36 @@ const sayi = (envAdi, jsonAdi, varsayilan) => {
   return Number.isFinite(n) && n >= 0 ? n : varsayilan
 }
 
+// Bot kendisi ayar yazar (konsola yapıştırılan token, /kur'un açtığı kanal ve
+// roller): ayarlar.json yoksa örnekten oluşturur, sadece verilen alanları değiştirir.
+// Dosya bozuksa üstüne yazmaz, ayarlar.bozuk.json adıyla saklar.
+function kaydet(degisen) {
+  const dosya = path.join(__dirname, 'ayarlar.json')
+  let mevcut = null
+  const metin = oku('ayarlar.json')
+  if (metin) {
+    try {
+      mevcut = JSON.parse(metin)
+    } catch (_) {
+      fs.copyFileSync(dosya, path.join(__dirname, 'ayarlar.bozuk.json'))
+      console.log('[ayar] ayarlar.json bozuktu, ayarlar.bozuk.json adıyla saklandı, yenisi yazılıyor.')
+    }
+  }
+  if (!mevcut) {
+    try {
+      mevcut = JSON.parse(oku('ayarlar.ornek.json') || '{}')
+    } catch (_) {
+      mevcut = {}
+    }
+  }
+  Object.assign(mevcut, degisen)
+  fs.writeFileSync(dosya + '.tmp', JSON.stringify(mevcut, null, 2) + '\n', 'utf-8')
+  fs.renameSync(dosya + '.tmp', dosya)
+  json = mevcut
+}
+
 module.exports = {
+  kaydet,
   discordToken: al('DISCORD_TOKEN', 'discord_token'),
   guildId: al('GUILD_ID', 'guild_id'),
   logKanalId: al('LOG_CHANNEL_ID', 'log_kanal_id'), // satıcı logu (satışlar, hatalar)

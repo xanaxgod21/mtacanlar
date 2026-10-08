@@ -9,6 +9,10 @@ ayrı çalışır.
 
 ## Yenilikler (son sürüm)
 
+- **Tek komutla kurulum:** dosya düzenlemek yok. `baslat.bat` açılınca token'ı
+  sorar (yapıştır, Enter), botu sunucuna ekleme linkini açar; sunucunda `/kur`
+  yazınca bot log kanallarını, Yaren Yetkili / Yaren Müşteri rollerini, key
+  kanalını ve yönetim panelini kendisi açar, ayarları kaydeder.
 - **Sunucuya otomatik giriş:** sunucu girişte `/register` ya da `/login` isterse
   bot kendisi yazar. Müşteri şifreyi bir kere odasında `/giris sifre:...` ile verir.
   Şifre yanlışsa bot döngüye girmez, odaya "şifre yanlış" yazar. Şifre hiçbir
@@ -30,68 +34,67 @@ ayrı çalışır.
 
 ## Kurulum (satıcı, Windows)
 
-İlk kez kuruyorsan **`KURULUM.txt`** dosyasını aç: bot hesabını açmaktan ilk
-keyi denemeye kadar adım adım anlatır. Aşağısı ayarların ayrıntısıdır.
+Adım adım anlatım: **`KURULUM.txt`**. Kısaca, dosya düzenlemek yok:
 
-Yaren için Developer Portal'da **ayrı bir uygulama** (bot hesabı) aç. Başka bir
-bot programının token'ını kullanma: Yaren açılırken sunucudaki slash komutlarını
-kendi listesiyle değiştirir, o botun komutları silinir.
+1. Developer Portal'da Yaren için **yeni bir uygulama** aç, Bot > **Reset Token**
+   ile token'ı kopyala. Başka bir bot programının token'ını kullanma: Yaren
+   açılırken sunucudaki slash komutlarını kendi listesiyle değiştirir.
+2. **Node.js LTS** kur (https://nodejs.org), sonra **`baslat.bat`**'a çift tıkla.
+   İlk açılışta paketleri kendisi indirir (`kur.bat` da aynısını yapar).
+3. Siyah pencere **token'ı sorar**: yapıştır, Enter. Bot Discord'a sorup dener,
+   doğruysa `ayarlar.json`'a kaydeder ve ekranda gizler. Yanlışsa tekrar sorar.
+   Token sonradan sıfırlanırsa (Reset Token) bir sonraki açılışta yenisini sorar.
+   Message Content Intent kapalıysa bot onu Discord'un izin verdiği yoldan
+   kendisi açmayı dener (100'den az sunucudaki botlarda olur).
+4. Bot **davet linkini** yazar ve tarayıcıda açar (Yönetici izniyle). Sunucunu
+   seç, Yetkilendir.
+5. Sunucunda herhangi bir kanala **`/kur`** yaz (sunucu sahibi ya da Yönetici).
+   Bot kendisi açar ve `ayarlar.json`'a yazar:
+   - **Yaren Yönetim** kategorisi (sadece sen ve Yaren Yetkili): `#yaren-log`,
+     `#yaren-key-log`, `#yaren-yonetim` (yönetim paneli)
+   - herkese açık **`#key-gir`** ve içinde "Key Gir" paneli
+   - **@Yaren Yetkili** rolü: sana verilir; kime verirsen logları ve paneli görür,
+     key verip lisans yönetebilir
+   - **@Yaren Müşteri** rolü: key girene verilir, süresi bitince alınır
 
-1. **Node.js** kur: https://nodejs.org adresinden **LTS** sürümünü indir, hep
-   "Next" diyerek kur.
-2. Bu klasörde **`kur.bat`** dosyasına çift tıkla. Paketleri indirir,
-   `ayarlar.json` dosyasını oluşturup Not Defteri'nde açar.
-3. `ayarlar.json` içini doldur, kaydet:
-   - `discord_token`: Developer Portal > uygulaman > Bot > **Reset Token**
-   - `guild_id`: satış yaptığın Discord sunucusu
-   - `log_kanal_id`: satışların, başlatmaların ve hataların düşeceği kanal (sadece sen gör)
-   - `key_log_kanal_id`: **key logu** için ayrı kanal (sadece sen gör). Kim hangi
-     keyi ne zaman üretti, kime verdi, kim ne zaman kullandı, kim iptal etti; lisans
-     uzatma/bitirme/iptal ve süresi dolanlar buraya saatiyle düşer. Boş bırakırsan
-     bunlar `log_kanal_id` kanalına gider. Ayrıca `veri/key_log.txt` dosyasına da yazılır.
-   - `discord_sahip_id`: senin Discord ID'n (key üretir, her odayı görürsün)
-   - `yetkili_rol_id`: ekibin varsa bu roldekiler de key verip lisans yönetebilir
-     (boş = sadece sen). Komutları görmeleri için: Sunucu Ayarları > Entegrasyonlar >
-     bot > komutlara bu rolü ekle.
-   - `musteri_rol_id`: key girene otomatik verilecek rol (boş = kapalı). Botun
-     rolü, Sunucu Ayarları > Roller listesinde bu rolün **üstünde** olmalı.
-   - `gunluk_yedek`: `true` ise her gün yedek alınır ve sana DM ile gelir.
-   - `oda_silme_saat`: süre bitince müşterinin odası kaç saat sonra silinsin
-     (0 = hemen silinir; örneğin 24 yazarsan oda 1 gün kilitli bekler, sonra silinir)
-   - `anthropic_api_key`: yapay zeka için (boşsa yapay zeka kapalı)
-   - `max_bot`: aynı anda en fazla kaç müşteri botu çalışsın (her müşteri 1 bot,
-     her bot kendi sunucusuna girer). Ölçülen: bot başı ~140 MB RAM; boştayken
-     neredeyse CPU yemez, görev yaparken (odun/taş) bot başı ~0,2 çekirdek.
-     20 bot için en az **4 GB RAM, 4 çekirdekli** bir VPS al. Daha fazla müşteri
-     için sayıyı artır, RAM'i ona göre büyüt (40 bot ≈ 6-8 GB).
-   - `ai_gunluk_limit`: müşteri başı günlük yapay zeka isteği (0 = sınırsız).
-     Yapay zeka parasını sen ödersin, bu sınır faturanı korur.
-   - `musteri_kategori_id`: boş bırakırsan bot "Yaren Odaları" kategorisini açar.
-4. Botu sunucuna **Yönetici** izniyle davet et (en kolayı). Developer Portal >
-   OAuth2 > URL Generator: `bot` ve `applications.commands` kutularını, altta
-   `Administrator` iznini seç, çıkan linki aç. Yönetici vermek istemezsen en az:
-   Kanalları Gör, Mesaj Gönder, Mesaj Geçmişini Oku, Bağlantı Yerleştir, Tepki
-   Ekle, Uygulama Komutlarını Kullan, Thread'lerde Mesaj Gönder, Thread Oluştur,
-   Kanalları Yönet, Rolleri Yönet, **Mesajları Yönet** (key kanalına yazılan keyleri
-   silmek için). Bot açılınca eksik izin varsa log kanalına yazar. Yönetici
-   vermediysen sadece sana açık kanallara (log, key log) Yaren'i kanal
-   ayarları > İzinler > "Üye veya rol ekle" ile ekle; yoksa bot oraya yazamaz.
-   Ayrıca Developer Portal > uygulaman > **Bot** sayfasında **Message Content
-   Intent**i aç ve kaydet: müşteri keyini kanala yazarak girebilsin diye. Kapalıysa
-   sadece "Key Gir" butonu çalışır (bot açılırken bunu kendisi anlar).
-5. **`baslat.bat`** ile başlat (kapanırsa 10 sn sonra kendisi yeniden açılır).
-   Bilgisayar/VPS kapanınca botlar da kapanır; açınca çalışan müşteri botları
-   kendiliğinden geri gelir.
-6. Müşterilerin göreceği bir kanal aç (örneğin `#key-gir`) ve orada `/panel-kur`
-   yaz. Burası **key kanalı** olur: müşteri keyini buraya yazar (mesajı hemen
-   silinir, kimse görmez) ya da "Key Gir" butonuna basar.
-7. Herkese açık bir kanalda (ör. `#genel`) `/yonetim-kur` yaz: bot sana (ve
-   yetkililere) özel `#yaren-yonetim` kanalını açıp **yönetim panelini** oraya
-   koyar (cevabı sadece sen görürsün). Kendi gizli kanalında yazarsan panel o
-   kanala kurulur; o zaman bot o kanalı görebilmeli. Log kanallarında yazma.
+`/kur`'u tekrar yazarsan var olanları kullanır, silinen kanalı yeniden açar.
+Kurulduktan sonra `/kur`'u sadece satıcı (ilk `/kur` yazan) yazabilir; satıcı
+sunucudan çıkmışsa sunucu sahibi devralır. Bot sunucudan atılırsa ayarlar durur,
+geri eklenince kaldığı yerden devam eder.
 
-Linux VPS'te: `npm install`, `cp ayarlar.ornek.json ayarlar.json`, `nano ayarlar.json`,
-sonra sürekli çalışsın ve VPS yeniden açılınca kendiliğinden başlasın diye:
+**`baslat.bat`** kapanırsa botu 10 sn sonra yeniden açar. Bilgisayar/VPS
+kapanınca botlar da kapanır; açınca çalışan müşteri botları kendiliğinden geri gelir.
+
+### ayarlar.json (bot doldurur, istersen elle değiştirirsin)
+
+- `discord_token`: token (konsolda sorulur)
+- `guild_id`, `log_kanal_id`, `key_log_kanal_id`, `discord_sahip_id`,
+  `yetkili_rol_id`, `musteri_rol_id`: `/kur` doldurur. Key logu kim hangi keyi ne
+  zaman üretti, kime verdi, kim kullandı, kim iptal etti; lisans uzatma/bitirme/iptal
+  ve süresi dolanlar saatiyle düşer, ayrıca `veri/key_log.txt` dosyasına yazılır.
+- `gunluk_yedek`: `true` ise her gün yedek alınır ve sana DM ile gelir.
+- `oda_silme_saat`: süre bitince müşterinin odası kaç saat sonra silinsin
+  (0 = hemen silinir; örneğin 24 yazarsan oda 1 gün kilitli bekler, sonra silinir)
+- `anthropic_api_key`: yapay zeka için (boşsa yapay zeka kapalı)
+- `max_bot`: aynı anda en fazla kaç müşteri botu çalışsın (her müşteri 1 bot,
+  her bot kendi sunucusuna girer). Ölçülen: bot başı ~140 MB RAM; boştayken
+  neredeyse CPU yemez, görev yaparken (odun/taş) bot başı ~0,2 çekirdek.
+  20 bot için en az **4 GB RAM, 4 çekirdekli** bir VPS al. Daha fazla müşteri
+  için sayıyı artır, RAM'i ona göre büyüt (40 bot ≈ 6-8 GB).
+- `ai_gunluk_limit`: müşteri başı günlük yapay zeka isteği (0 = sınırsız).
+  Yapay zeka parasını sen ödersin, bu sınır faturanı korur.
+- `musteri_kategori_id`: boş bırakırsan bot "Yaren Odaları" kategorisini açar.
+
+Elle kurmak istersen (eski yol) `/panel-kur` bulunduğun kanalı key kanalı,
+`/yonetim-kur` yönetim panelini kurar. Botu Yönetici olmadan eklediysen en az:
+Kanalları Gör, Mesaj Gönder, Mesaj Geçmişini Oku, Bağlantı Yerleştir, Dosya Ekle,
+Tepki Ekle, Uygulama Komutlarını Kullan, Thread'lerde Mesaj Gönder, Thread Oluştur,
+Kanalları Yönet, Rolleri Yönet, **Mesajları Yönet** izinleri lazım; `/kur` eksik
+izni söyler.
+
+Linux VPS'te: `npm install`, sonra bir kere `node discordbot.js` ile aç, token'ı
+yapıştır, sunucunda `/kur` yaz, Ctrl+C ile kapat. Sonra sürekli çalışsın ve VPS
+yeniden açılınca kendiliğinden başlasın diye:
 `sudo npm install -g pm2`, `pm2 start discordbot.js --name yaren`, `pm2 save`, `pm2 startup`.
 
 **Güncellerken** yeni dosyaları üstüne kopyala ama `ayarlar.json` ve `veri/`
@@ -159,6 +162,7 @@ başlar**; key beklerken süre yanmaz.
 | `/panel-kaldir` | Bulunduğun kanal artık key kanalı olmaz (yanlış kanalda kurduysan) |
 | `/yonetim-kur` | Butonlu yönetim panelini kurar |
 | `/yedek` | Bütün müşteri ve key kayıtlarının yedeğini şimdi alır, dosyaları sana gösterir |
+| `/kur` | Log kanallarını, rolleri, key kanalını ve yönetim panelini açar ya da eksikleri tamamlar (sadece satıcı) |
 
 Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
 
