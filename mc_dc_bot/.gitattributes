@@ -1,2 +1,4 @@
 # Windows komut dosyaları CRLF olmalı, yoksa "goto" satırları bozulabilir
 *.bat text eol=crlf
+# Not Defteri eski sürümleri LF satır sonlarını tek satır gösterir
+KURULUM.txt text eol=crlf

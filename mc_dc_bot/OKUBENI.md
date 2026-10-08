@@ -30,6 +30,13 @@ ayrı çalışır.
 
 ## Kurulum (satıcı, Windows)
 
+İlk kez kuruyorsan **`KURULUM.txt`** dosyasını aç: bot hesabını açmaktan ilk
+keyi denemeye kadar adım adım anlatır. Aşağısı ayarların ayrıntısıdır.
+
+Yaren için Developer Portal'da **ayrı bir uygulama** (bot hesabı) aç. Başka bir
+bot programının token'ını kullanma: Yaren açılırken sunucudaki slash komutlarını
+kendi listesiyle değiştirir, o botun komutları silinir.
+
 1. **Node.js** kur: https://nodejs.org adresinden **LTS** sürümünü indir, hep
    "Next" diyerek kur.
 2. Bu klasörde **`kur.bat`** dosyasına çift tıkla. Paketleri indirir,
