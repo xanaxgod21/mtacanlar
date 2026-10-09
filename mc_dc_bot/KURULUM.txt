@@ -1,24 +1,13 @@
 YAREN - KURULUM (5 adım, dosya düzenlemek yok)
 ==============================================
 
-Yaren kendi başına çalışan bir Discord botu programıdır. Sen sadece bot
-hesabının token'ını siyah pencereye yapıştırırsın, sunucunda /kur yazarsın.
+Yaren kendi başına çalışan bir Discord botu programıdır. Sen sadece
+baslat.bat'ı açarsın, Discord'da bot token'ını "Copy" ile kopyalarsın ve
+sunucunda /kur yazarsın.
 Kanalları, rolleri ve panelleri bot kendisi açar. Toplam 5-10 dk.
 
 
-1) BOT HESABINI AÇ
-------------------
- a. https://discord.com/developers/applications adresine gir.
- b. Sağ üstte "New Application" > ad: Yaren > kutuyu işaretle > "Create".
- c. Soldan "Bot" sekmesi > "Reset Token" > "Yes, do it!" > "Copy".
-    Bu token botun şifresidir: KİMSEYE GÖSTERME, ekran görüntüsü atma.
-
- Eski bir botun varsa onun token'ını KULLANMA, Yaren için yeni hesap aç.
- (Yaren açılırken sunucudaki komutlarını kendi listesiyle değiştirir,
-  aynı token'ı kullanan eski botun komutları silinir.)
-
-
-2) PROGRAMI AÇ
+1) PROGRAMI AÇ
 --------------
  a. Zip'i bir klasöre çıkar (ör. C:\Yaren). Zip'in içinden çalıştırma.
  b. https://nodejs.org > "LTS" sürümünü indir, hep "Next" diyerek kur.
@@ -31,24 +20,34 @@ Kanalları, rolleri ve panelleri bot kendisi açar. Toplam 5-10 dk.
     "Ek bilgi" > "Yine de çalıştır".
 
 
-3) TOKEN'I YAPIŞTIR
--------------------
-baslat.bat açılınca küçük bir "Yaren - Discord bot token" penceresi açılır.
-1-c'de kopyaladığın token'ı kutuya yapıştır (Ctrl+V ya da sağ tık > Yapıştır), "Tamam"a bas.
-Kutuda nokta nokta görünür (token gizli kalsın diye).
- - Doğruysa siyah pencere "Token kaydedildi" der, bir daha sormaz.
- - Yanlışsa pencere nedenini yazıp tekrar açılır.
+2) BOT HESABINI AÇ (tarayıcı kendiliğinden açılır)
+-------------------------------------------------
+Siyah pencerede "YAREN İLK AYAR" yazısı çıkar ve tarayıcıda Discord
+Developer Portal açılır (açılmazsa: https://discord.com/developers/applications).
+ a. Sağ üstte "New Application" > ad: Yaren > kutuyu işaretle > "Create".
+ b. Soldan "Bot" sekmesi > "Reset Token" > "Yes, do it!" > "Copy".
 
-Küçük pencere çıkmazsa siyah pencere "Token:" diye sorar:
- - Token'ı kopyaladıktan sonra SADECE Enter'a bas: bot kopyaladığın token'ı
-   kendisi alır. (Ya da sağ tık / Ctrl+V ile yapıştır; her harf * olarak
-   görünür, sonra Enter.)
- - O da olmazsa: bu klasörde boş yere sağ tık > Yeni > Metin Belgesi, adını
-   "token" yap, açıp token'ı içine yapıştır, kaydet, baslat.bat'ı yeniden
-   aç. Bot token'ı okur ve dosyayı siler.
+ Eski bir botun varsa onun token'ını KULLANMA, Yaren için yeni hesap aç.
+ (Yaren açılırken sunucudaki komutlarını kendi listesiyle değiştirir,
+  aynı token'ı kullanan eski botun komutları silinir.)
+
+
+3) TOKEN: HİÇBİR ŞEY YAPIŞTIRMANA GEREK YOK
+------------------------------------------
+"Copy"ye bastığın an bot kopyaladığın token'ı kendisi görür. Siyah
+pencerede "kopyaladığın token alındı" ve "Token kaydedildi" yazar.
+Bir daha sormaz. Token botun şifresidir: KİMSEYE GÖSTERME.
+
+Kendiliğinden almazsa (çok nadir):
+ - Siyah pencereye bir kere tıkla ve Enter'a bas (kopyaladığını alır),
+ - ya da token'ı siyah pencereye yapıştır (sağ tık ya da Ctrl+V; her harf
+   * olarak görünür) ve Enter'a bas,
+ - o da olmazsa: bu klasörde boş yere sağ tık > Yeni > Metin Belgesi,
+   adını "token" yap, içine token'ı yapıştır, kaydet. Bot birkaç saniye
+   içinde okur ve dosyayı siler.
 
 Sonradan Developer Portal'da "Reset Token" yaparsan bot bunu anlar ve
-yenisini sorar.
+yenisini ister (yine "Copy"ye basman yeter).
 
 
 4) BOTU SUNUCUNA EKLE
@@ -109,12 +108,12 @@ SORUN ÇIKARSA (siyah pencerede ya da Discord'da yazan)
 -----------------------------------------------------
  "Bu bir bot token'ına benzemiyor"
      -> Yanlış şeyi kopyaladın (ör. Application ID ya da Client Secret).
-        Bot sekmesindeki "Reset Token" ile alınanı yapıştır.
+        Bot sekmesindeki "Reset Token" > "Copy" ile alınanı kopyala.
  "Discord bu token'ı kabul etmedi"
      -> Token eksik kopyalanmış ya da sonradan sıfırlanmış. "Reset Token"
-        yap, yenisini yapıştır.
+        > "Copy" ile yenisini kopyala.
  "Discord'a ulaşılamadı"
-     -> İnternet bağlantını kontrol et, token'ı tekrar yapıştır.
+     -> İnternet bağlantını kontrol et, token'ı tekrar kopyala.
  /kur görünmüyor
      -> Discord'u Ctrl+R ile yenile. /kur'u sadece sunucu sahibi ve
         Yönetici yetkisi olanlar görür. Bot sunucuda değilse adım 4.
@@ -152,9 +151,12 @@ SORUN ÇIKARSA (siyah pencerede ya da Discord'da yazan)
  "Token geçersiz oldu"
      -> Developer Portal'da token sıfırlanmış. Bot kendini yeniden açar ve
         yeni token'ı sorar.
- Token'ı yapıştıramıyorum
-     -> Token'ı kopyala, siyah pencereye bir kere tıkla ve sadece Enter'a
-        bas: bot panodan kendisi alır. Pencere başlığında "Seç" / "Select"
-        yazıyorsa önce Esc'e bas. Olmazsa adım 3'teki token.txt yolunu kullan.
+ Token alınmıyor
+     -> Developer Portal'da "Reset Token" > "Copy"ye tekrar bas. Siyah
+        pencerenin başlığında "Seç" / "Select" yazıyorsa önce Esc'e bas,
+        sonra Enter. Olmazsa adım 3'teki token.txt yolunu kullan.
+ Siyah pencere açılıp hemen kapanıyor / "Gerekli paket kurulu değil"
+     -> Node.js kurulu mu (adım 1-b)? Kuruluysa kur.bat'ı çalıştır. Zip'in
+        içinden değil, çıkardığın klasörden açtığından emin ol.
 
 Bütün komutlar ve özellikler: OKUBENI.md

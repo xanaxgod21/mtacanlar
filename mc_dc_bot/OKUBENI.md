@@ -41,12 +41,12 @@ Adım adım anlatım: **`KURULUM.txt`**. Kısaca, dosya düzenlemek yok:
    açılırken sunucudaki slash komutlarını kendi listesiyle değiştirir.
 2. **Node.js LTS** kur (https://nodejs.org), sonra **`baslat.bat`**'a çift tıkla.
    İlk açılışta paketleri kendisi indirir (`kur.bat` da aynısını yapar).
-3. **Token'ı sorar:** Windows'ta küçük bir pencere açılır, token'ı kutuya yapıştırıp
-   Tamam'a basarsın. Pencere çıkmazsa siyah pencerede `Token:` sorulur; kopyaladıktan
-   sonra sadece Enter'a basmak yeter (panodan alır), ya da yapıştırıp Enter (her harf
-   `*` görünür). Son çare: klasöre `token.txt` koyup içine token'ı yaz (okunur, silinir).
-   Bot token'ı Discord'a sorup dener, doğruysa `ayarlar.json`'a kaydeder. Yanlışsa
-   tekrar sorar.
+3. **Token'ı sorar:** Developer Portal tarayıcıda açılır. Bot > Reset Token > **Copy**'ye
+   basman yeter: bot panoyu izler, kopyalanan token'ı kendisi alır (sadece token'a
+   benzeyen kısa metinlere bakar, token sorulurken). İstersen siyah pencereye
+   yapıştırıp Enter'a da basabilirsin (her harf `*` görünür); son çare klasöre
+   `token.txt` koymak (okunur, silinir). Bot token'ı Discord'a sorup dener, doğruysa
+   `ayarlar.json`'a kaydeder; yanlışsa söyler ve yenisini bekler.
    Token sonradan sıfırlanırsa (Reset Token) bir sonraki açılışta yenisini sorar.
    Message Content Intent kapalıysa bot onu Discord'un izin verdiği yoldan
    kendisi açmayı dener (100'den az sunucudaki botlarda olur).

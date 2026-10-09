@@ -20,9 +20,20 @@
 // müşteri rollerini, key kanalını ve yönetim panelini kendisi açar, ayarları
 // kaydeder. Message Content Intent kapalıysa açılışta kendisi açmayı dener.
 
+console.log('Yaren açılıyor...')
+// Paketler kurulmamışsa (npm install yarıda kalmış) anlaşılır söyle, baslat.bat beklesin (kod 5)
+for (const paket of ['discord.js', 'mineflayer']) {
+  try {
+    require.resolve(paket)
+  } catch (_) {
+    console.error(`Gerekli paket (${paket}) kurulu değil. Bu klasördeki kur.bat'ı çalıştır (internet gerekir).`)
+    process.exit(5)
+  }
+}
+
 const fs = require('fs')
 const net = require('net')
-const { spawn, execFileSync } = require('child_process')
+const { spawn, execFile, execFileSync } = require('child_process')
 const zlib = require('zlib')
 const path = require('path')
 const {
@@ -2655,8 +2666,8 @@ async function eskiOdalariSil() {
 setInterval(() => eskiOdalariSil().catch((e) => console.error('Oda temizliği:', e.message)), 10 * 60000)
 
 // ---------- GİRİŞ (token) ----------
-// Token yoksa ya da Discord kabul etmiyorsa komut penceresinde sorulur:
-// yapıştırılır, Discord'a sorularak denenir, ayarlar.json'a kaydedilir.
+// Token yoksa ya da Discord kabul etmiyorsa sorulur (aşağıda TOKEN ALMA), Discord'a
+// sorularak denenir, ayarlar.json'a kaydedilir.
 const tokenTemizle = (t) =>
   String(t || '')
     .trim()
@@ -2664,53 +2675,66 @@ const tokenTemizle = (t) =>
     .replace(/^(Bot|Bearer)\s+/i, '')
     .trim()
 
-// Token konsola yazılır/yapıştırılır: her karakter yerine * görünür (token ekranda
-// kalmasın ama yapıştırmanın işe yaradığı görülsün). Boş Enter ya da eski konsoldaki
-// Ctrl+V (^V) panodaki metni alır. Ctrl+C bot'u kapatır (takılı kalmaz).
-function tokenOku(metin) {
-  return new Promise((coz) => {
-    const girdi = process.stdin
-    process.stdout.write(metin)
-    let deger = ''
-    const ekle = (s) => {
-      deger += s
-      process.stdout.write('*'.repeat([...s].length))
-    }
-    const bitir = () => {
-      girdi.removeListener('data', veri)
-      if (girdi.isTTY) girdi.setRawMode(false)
-      girdi.pause()
-      process.stdout.write('\n')
-      coz(deger)
-    }
-    const veri = (parca) => {
-      // ok tuşları, yapıştırma işaretleri (ESC [ ... ) gibi diziler atılır
-      const temiz = String(parca).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b./g, '')
-      for (const ch of temiz) {
-        if (ch === '\r' || ch === '\n') return bitir()
-        if (ch === '\u0003' || (ch === '\u0004' && !deger)) {
-          process.stdout.write('\n')
-          process.exit(0)
-        }
-        if (ch === '\u0016') {
-          ekle(panoyuOku())
-          continue
-        }
-        if (ch === '\u007f' || ch === '\b') {
-          if (deger) {
-            deger = [...deger].slice(0, -1).join('')
-            process.stdout.write('\b \b')
-          }
-          continue
-        }
-        if (ch >= ' ') ekle(ch)
+// ---------- TOKEN ALMA ----------
+// Token üç yoldan hangisi önce gelirse oradan alınır:
+//  1) Pano izlenir: Developer Portal'da "Copy"ye basılınca token kendiliğinden alınır
+//     (yapıştırmak gerekmez; sadece token'a benzeyen kısa metinlere bakılır).
+//  2) Konsola yapıştırılır ya da yazılır: her karakter yerine * görünür. Boş Enter panoyu
+//     bir kez daha okur, eski konsoldaki Ctrl+V (^V) panoyu yapıştırır.
+//  3) Klasöre token.txt konursa okunur ve silinir.
+// Ctrl+C bot'u kapatır (takılı kalmaz).
+const TOKEN_BICIMI = /^[\w-]+\.[\w-]+\.[\w-]+$/
+const PANO_TOKEN_BICIMI = /^[\w-]{20,}\.[\w-]{4,}\.[\w-]{20,}$/ // panodan kendiliğinden almak için daha sıkı
+
+// Konsoldan satır okur; geri dönen fonksiyon okumayı yarıda keser
+function konsoldanOku(metin, bitince) {
+  const girdi = process.stdin
+  process.stdout.write(metin)
+  let deger = ''
+  let acik = true
+  const ekle = (s) => {
+    deger += s
+    process.stdout.write('*'.repeat([...s].length))
+  }
+  const kapat = () => {
+    if (!acik) return
+    acik = false
+    girdi.removeListener('data', veri)
+    if (girdi.isTTY) girdi.setRawMode(false)
+    girdi.pause()
+    process.stdout.write('\n')
+  }
+  const veri = (parca) => {
+    // ok tuşları, yapıştırma işaretleri (ESC [ ...) gibi diziler atılır
+    const temiz = String(parca).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b./g, '')
+    for (const ch of temiz) {
+      if (ch === '\r' || ch === '\n') {
+        kapat()
+        return bitince(deger)
       }
+      if (ch === '\u0003' || (ch === '\u0004' && !deger)) {
+        kapat()
+        process.exit(0)
+      }
+      if (ch === '\u0016') {
+        ekle(panoyuOku())
+        continue
+      }
+      if (ch === '\u007f' || ch === '\b') {
+        if (deger) {
+          deger = [...deger].slice(0, -1).join('')
+          process.stdout.write('\b \b')
+        }
+        continue
+      }
+      if (ch >= ' ') ekle(ch)
     }
-    if (girdi.isTTY) girdi.setRawMode(true)
-    girdi.setEncoding('utf8')
-    girdi.on('data', veri)
-    girdi.resume()
-  })
+  }
+  if (girdi.isTTY) girdi.setRawMode(true)
+  girdi.setEncoding('utf8')
+  girdi.on('data', veri)
+  girdi.resume()
+  return kapat
 }
 
 // Panodaki (kopyalanan) metin; okunamazsa ''
@@ -2727,50 +2751,68 @@ function panoyuOku() {
   return calistir('xclip', ['-o', '-selection', 'clipboard']) || calistir('wl-paste', ['-n'])
 }
 
-// Windows'ta token'ı küçük bir pencerede sorar (Ctrl+V ve sağ tık > Yapıştır orada
-// her zaman çalışır, yazılan nokta nokta görünür). { metin } | { iptal: true } | null (açılamadı)
-function pencereyleSor(mesaj) {
-  if (process.platform !== 'win32' || process.env.YAREN_PENCERESIZ) return null
-  const tirnak = (s) => "'" + String(s).replace(/'/g, "''") + "'"
-  const betik = [
-    'Add-Type -AssemblyName System.Windows.Forms',
-    'Add-Type -AssemblyName System.Drawing',
-    '[System.Windows.Forms.Application]::EnableVisualStyles()',
-    '$f = New-Object System.Windows.Forms.Form',
-    "$f.Text = 'Yaren - Discord bot token'",
-    '$f.ClientSize = New-Object System.Drawing.Size(540, 140)',
-    "$f.StartPosition = 'CenterScreen'",
-    '$f.TopMost = $true',
-    "$f.FormBorderStyle = 'FixedDialog'",
-    '$f.MaximizeBox = $false',
-    '$f.MinimizeBox = $false',
-    '$l = New-Object System.Windows.Forms.Label',
-    `$l.Text = ${tirnak(mesaj)}`,
-    '$l.SetBounds(12, 10, 516, 44)',
-    '$t = New-Object System.Windows.Forms.TextBox',
-    '$t.SetBounds(12, 60, 516, 24)',
-    '$t.UseSystemPasswordChar = $true',
-    '$b = New-Object System.Windows.Forms.Button',
-    "$b.Text = 'Tamam'",
-    '$b.SetBounds(438, 98, 90, 30)',
-    '$b.DialogResult = [System.Windows.Forms.DialogResult]::OK',
-    '$f.AcceptButton = $b',
-    '$f.Controls.AddRange(@($l, $t, $b))',
-    '$f.Add_Shown({ $f.Activate(); $t.Focus() })',
-    "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write('OK:' + $t.Text) } else { [Console]::Out.Write('IPTAL') }",
-  ].join('\n')
-  try {
-    const cikti = execFileSync(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(betik, 'utf16le').toString('base64')],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }
-    )
-    if (cikti.startsWith('OK:')) return { metin: cikti.slice(3) }
-    if (cikti.startsWith('IPTAL')) return { iptal: true }
-    return null
-  } catch (_) {
-    return null
+// Panoyu izler, kısa metin değiştikçe bildirir. Geri dönen fonksiyon izlemeyi durdurur.
+// Windows'ta tek bir PowerShell sürekli çalışır (her saniye yeni işlem açılmasın).
+const PANO_IZLE_PS = [
+  '$son = $null',
+  'while ($true) {',
+  '  try { $c = Get-Clipboard -Raw } catch { $c = $null }',
+  '  if ($c -and $c.Length -lt 300 -and $c -ne $son) {',
+  '    $son = $c',
+  '    [Console]::Out.WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($c)))',
+  '    [Console]::Out.Flush()',
+  '  }',
+  '  Start-Sleep -Milliseconds 700',
+  '}',
+].join('\n')
+function panoIzle(degisince) {
+  if (process.platform === 'win32') {
+    let cocuk
+    try {
+      cocuk = spawn(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(PANO_IZLE_PS, 'utf16le').toString('base64')],
+        { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }
+      )
+    } catch (_) {
+      return () => {}
+    }
+    cocuk.on('error', () => {})
+    let tampon = ''
+    cocuk.stdout.on('data', (d) => {
+      tampon += d
+      let n
+      while ((n = tampon.indexOf('\n')) >= 0) {
+        const satir = tampon.slice(0, n).trim()
+        tampon = tampon.slice(n + 1)
+        if (satir) degisince(Buffer.from(satir, 'base64').toString('utf8'))
+      }
+    })
+    const oldur = () => {
+      try {
+        cocuk.kill()
+      } catch (_) {}
+    }
+    process.once('exit', oldur) // bot kapanırsa PowerShell arkada kalmasın
+    return () => {
+      process.removeListener('exit', oldur)
+      oldur()
+    }
   }
+  let son = null
+  let calisiyor = false
+  const zamanlayici = setInterval(() => {
+    if (calisiyor) return
+    calisiyor = true
+    const komut = process.platform === 'darwin' ? ['pbpaste', []] : ['xclip', ['-o', '-selection', 'clipboard']]
+    execFile(komut[0], komut[1], { encoding: 'utf8', timeout: 3000 }, (hata, cikti) => {
+      calisiyor = false
+      if (hata || !cikti || cikti.length >= 300 || cikti === son) return
+      son = cikti
+      degisince(cikti)
+    })
+  }, 1000)
+  return () => clearInterval(zamanlayici)
 }
 
 // Son çare: klasöre token.txt koyup içine token yapıştırılırsa okunur ve dosya silinir
@@ -2785,6 +2827,44 @@ function tokenDosyasiOku() {
     } catch (_) {}
   }
   return ''
+}
+
+// Bir token gelene kadar bekler (pano, konsol, token.txt). denenenler: geçersiz çıkmış
+// tokenlar, panoda dururken tekrar tekrar denenmesin.
+function tokenBekle(denenenler) {
+  return new Promise((coz) => {
+    let bitti = false
+    const durdurulacaklar = []
+    const bitir = (ham, kaynak) => {
+      if (bitti) return
+      bitti = true
+      for (const d of durdurulacaklar) d()
+      coz({ ham, kaynak })
+    }
+    durdurulacaklar.push(
+      panoIzle((metin) => {
+        const t = tokenTemizle(metin)
+        if (PANO_TOKEN_BICIMI.test(t) && !denenenler.has(t)) bitir(t, 'pano')
+      })
+    )
+    const dosyaSayaci = setInterval(() => {
+      const t = tokenDosyasiOku()
+      if (t) bitir(t, 'dosya')
+    }, 1000)
+    durdurulacaklar.push(() => clearInterval(dosyaSayaci))
+    // boş Enter: panoya bakar; o da boşsa ne yapılacağını söyleyip yeniden sorar
+    const sor = () =>
+      durdurulacaklar.push(
+        konsoldanOku('Token: ', (deger) => {
+          if (deger.trim()) return bitir(deger, 'konsol')
+          const pano = panoyuOku()
+          if (pano.trim()) return bitir(pano, 'pano')
+          console.log("(Boş: Developer Portal'da \"Copy\"ye bas, bot kendisi alır; ya da token'ı buraya yapıştırıp Enter'a bas.)")
+          if (!bitti) sor()
+        })
+      )
+    if (process.stdin.isTTY) sor()
+  })
 }
 
 // Token'la uygulama bilgisini al: { uygulama } ya da { yanlis: true } / { hata }
@@ -2804,54 +2884,35 @@ async function tokenSor(neden) {
     console.error(`${neden} Botu bir kere komut penceresinde (node discordbot.js) aç, token'ı yapıştır; ya da bu klasöre token.txt koyup içine token'ı yaz.`)
     process.exit(1)
   }
+  const portal = 'https://discord.com/developers/applications'
   console.log('')
   console.log('==================== YAREN İLK AYAR ====================')
   console.log(neden)
-  console.log('1) https://discord.com/developers/applications adresine gir.')
-  console.log('2) "New Application" > ad ver (ör. Yaren) > Create.')
-  console.log('3) Soldan "Bot" > "Reset Token" > "Yes, do it!" > "Copy".')
-  if (process.platform === 'win32') {
-    console.log('4) Açılan küçük "Yaren" penceresine token\'ı yapıştır (Ctrl+V ya da sağ tık >')
-    console.log('   Yapıştır) ve Tamam\'a bas. Pencere çıkmazsa buraya yapıştırıp Enter\'a bas;')
-    console.log('   ya da kopyaladıktan sonra sadece Enter\'a bas, bot panodan kendisi alır.')
-  } else {
-    console.log('4) Buraya yapıştır ve Enter\'a bas (her harf * olarak görünür).')
-    console.log('   Kopyaladıktan sonra sadece Enter\'a basarsan bot panodan almayı dener.')
-  }
-  console.log('   Token botun şifresidir: kimseye gösterme.')
+  console.log(`Discord Developer Portal tarayıcıda açılıyor (açılmazsa: ${portal})`)
+  console.log(' 1) "New Application" > ad ver (ör. Yaren) > Create')
+  console.log(' 2) Soldan "Bot" > "Reset Token" > "Yes, do it!" > "Copy"')
+  console.log(' 3) Bu kadar: "Copy"ye basınca bot token\'ı kendisi alır,')
+  console.log('    yapıştırmana gerek yok. (İstersen buraya yapıştırıp Enter\'a da basabilirsin.)')
+  console.log(' Token botun şifresidir: kimseye gösterme.')
   console.log('========================================================')
-  let pencereMesaji = "Discord bot token'ını aşağıya yapıştır (Ctrl+V ya da sağ tık > Yapıştır) ve Tamam'a bas."
-  let pencereYok = false
-  let ham = dosyadan
-  if (dosyadan) console.log('token.txt dosyasındaki token deneniyor (dosya silindi).')
+  if (!dosyadan) tarayicidaAc(portal)
+  const denenenler = new Set()
+  let ilk = dosyadan ? { ham: dosyadan, kaynak: 'dosya' } : null
   for (;;) {
-    if (!ham && !pencereYok) {
-      const r = pencereyleSor(pencereMesaji)
-      if (!r) pencereYok = true // PowerShell / pencere yok: konsoldan sor
-      else if (r.iptal) {
-        pencereYok = true
-        console.log('Pencere kapatıldı: token\'ı buraya yapıştırıp Enter\'a bas.')
-      } else ham = r.metin
-    }
-    if (!ham) {
-      if (!process.stdin.isTTY) process.exit(1) // token.txt yanlıştı, soracak konsol yok
-      ham = await tokenOku('Token: ')
-      if (!ham.trim()) {
-        ham = panoyuOku()
-        console.log(ham ? '(Kopyaladığın metin panodan alındı.)' : '(Boş: token\'ı kopyalayıp yapıştır ya da kopyaladıktan sonra Enter\'a bas.)')
-      }
-    }
+    const { ham, kaynak } = ilk || (await tokenBekle(denenenler))
+    ilk = null
     const token = tokenTemizle(ham)
-    ham = ''
     if (!token) continue
-    console.log('Token: ' + token.slice(0, 6) + '… (gizlendi)')
+    denenenler.add(token)
+    const nereden = { pano: 'kopyaladığın token alındı', dosya: 'token.txt okundu (dosya silindi)', konsol: 'yazdığın token alındı' }[kaynak] || 'token alındı'
+    console.log(`Token: ${token.slice(0, 6)}… (gizlendi) — ${nereden}, deneniyor...`)
     let sorun = ''
-    if (!/^[\w-]+\.[\w-]+\.[\w-]+$/.test(token)) {
+    if (!TOKEN_BICIMI.test(token)) {
       sorun = 'Bu bir bot token\'ına benzemiyor (noktayla ayrılmış 3 parça olmalı). Bot sayfasındaki "Reset Token" ile alınanı kopyala.'
     } else {
       const r = await tokenDene(token)
-      if (r.yanlis) sorun = 'Discord bu token\'ı kabul etmedi. "Reset Token" ile yenisini alıp tekrar yapıştır.'
-      else if (r.hata) sorun = `Discord'a ulaşılamadı (${r.hata}). İnternetini kontrol edip tekrar dene.`
+      if (r.yanlis) sorun = 'Discord bu token\'ı kabul etmedi. "Reset Token" > "Copy" ile yenisini al.'
+      else if (r.hata) sorun = `Discord'a ulaşılamadı (${r.hata}). İnternetini kontrol edip token'ı tekrar kopyala.`
       else {
         try {
           ayarlar.kaydet({ discord_token: token })
@@ -2863,7 +2924,7 @@ async function tokenSor(neden) {
       }
     }
     console.log(sorun)
-    pencereMesaji = sorun
+    if (!process.stdin.isTTY) process.exit(1) // token.txt yanlıştı, soracak konsol yok
   }
 }
 
