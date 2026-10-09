@@ -466,7 +466,7 @@ function hosgeldin(l) {
     'Diğer komutlar: `/sahip` `/giris` `/sohbet` `/yaz` `/komut` `/gorev` `/durum` `/sandik` `/soyle` `/durdur` `/bilgi`',
     'Oyun içinde: `!odun` `!maden` `!tas` `!farm` `!topla` `!bosalt` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş' +
       (depo.aiAktifMi(l) && AI_ANAHTAR ? '.' : ' ("Yaren odun kes", "Yaren gel" gibi; yapay zeka kapalıyken basit cümleleri anlar).'),
-    '**Sandık:** bot topladıklarını (bir yığın olunca ve iş bitince) görevin başladığı yere en yakın sandığa götürür. Kendi sandığını göstermek için oyunda dibinde dur ve `!sandik ekle` yaz: o zaman oraya bırakır, baltası/kazması kırılmak üzereyse oradan yenisini de alır.',
+    '**Sandık:** bot topladıklarını (bir yığın olunca ve iş kendiliğinden bitince) görevin başladığı yere en yakın sandığa götürür; "dur" dersen yanında tutar, "sandığa koy" dersen götürür. Kendi sandığını göstermek için oyunda dibinde dur ve `!sandik ekle` yaz: o zaman oraya bırakır, baltası/kazması kırılmak üzereyse oradan yenisini de alır.',
   ].join('\n')
 }
 
@@ -1730,10 +1730,14 @@ async function odaKomutu(i, l) {
 
   if (i.commandName === 'komut') {
     if (!yonetici.calisiyor(uid)) return i.reply(gizli('Botun çalışmıyor. Önce /baslat yaz.'))
-    const r = await oyundaCalistir(uid, i.options.getString('komut'))
-    if (r.hata) return i.reply(gizli(r.hata))
-    if (r.sifreli) return i.reply(gizli('Komut oyunda yazıldı (şifre içerebileceği için burada gösterilmiyor).'))
-    return i.reply({ content: `🎮 Oyunda yazıldı: ${kodYaz(r.komut)}${l.sohbetKapali ? SOHBET_KAPALI_NOTU : ''}`, allowedMentions: { parse: [] } })
+    const komut = oyunKomutu(i.options.getString('komut'))
+    if (!komut) return i.reply(gizli('Komutu yaz: örn. `/komut komut:warp xanaxgod` (oyunda /warp xanaxgod yazar).'))
+    const sifreli = sifreliKomut(komut)
+    await i.deferReply(sifreli ? { flags: MessageFlags.Ephemeral } : {}) // bot meşgulse cevap 3 sn'yi geçebilir
+    const r = await oyundaCalistir(uid, komut)
+    if (r.hata) return i.editReply(r.hata)
+    if (sifreli) return i.editReply('Komut oyunda yazıldı (şifre içerebileceği için burada gösterilmiyor).')
+    return i.editReply({ content: `🎮 Oyunda yazıldı: ${kodYaz(komut)}${l.sohbetKapali ? SOHBET_KAPALI_NOTU : ''}`, allowedMentions: { parse: [] } })
   }
 
   if (i.commandName === 'durdur') {
@@ -1802,8 +1806,10 @@ async function odaKomutu(i, l) {
 }
 
 // ---------- OYUNDA KOMUT (/komut ve odaya "/" ile yazılanlar) ----------
-// Şifre olabilecek komutlar (/login, /register, /cp...) odada gösterilmez.
-const SIFRELI_KOMUT = /^\/(login|l|log|giris|register|reg|kayit|changepassword|changepass|cp|sifre|password|pass|2fa|totp|unregister)\b/
+// Şifre olabilecek komutlar (/login, /register, /sifredegistir, /authme:login...) odada
+// gösterilmez, odaya yazıldıysa mesaj hemen silinir.
+const SIFRELI_KOMUT =
+  /^\/(?:[a-z0-9_.-]+:)?(login|log\b|l\b|giris|register|reg\b|kayit|changep|cp\b|sifre|parola|password|pass|2fa|totp|unregister|authme)/
 const SOHBET_KAPALI_NOTU = '\n_(Oyun sohbeti bu odaya aktarılmıyor; sunucunun cevabını görmek için `/sohbet durum:açık`.)_'
 const kodYaz = (t) => '`' + String(t).replace(/`/g, "'") + '`'
 const sadeKomut = (t) =>
@@ -1815,15 +1821,23 @@ const sadeKomut = (t) =>
     .replace(/ü/g, 'u')
     .replace(/ö/g, 'o')
     .replace(/ç/g, 'c')
-// { komut, sifreli } ya da { hata }
-async function oyundaCalistir(uid, metin) {
-  const k = String(metin || '').replace(/\s+/g, ' ').trim().replace(/^\/+\s*/, '')
-  if (!k) return { hata: 'Komutu yaz: örn. `/komut komut:warp xanaxgod` (oyunda /warp xanaxgod yazar).' }
-  const komut = '/' + k
+// "warp xanaxgod" ya da "/warp xanaxgod" -> "/warp xanaxgod" (baştaki tek / atılır: //set kalır)
+function oyunKomutu(metin) {
+  const k = String(metin || '').replace(/\s+/g, ' ').trim().replace(/^\/\s*/, '')
+  return k ? '/' + k : ''
+}
+const sifreliKomut = (komut) => SIFRELI_KOMUT.test(sadeKomut(komut))
+// { ok } ya da { hata }
+async function oyundaCalistir(uid, komut) {
   if (komut.length > 256) return { hata: 'Komut çok uzun (en fazla 256 karakter).' }
-  const r = await yonetici.istek(uid, 'yaz', { metin: komut })
+  let r = await yonetici.istek(uid, 'yaz', { metin: komut })
+  if (r.kod === 429) {
+    // oyun botu 1,5 sn'de bir yazdırır: art arda gelen komut kaybolmasın
+    await new Promise((coz) => setTimeout(coz, 1600))
+    r = await yonetici.istek(uid, 'yaz', { metin: komut })
+  }
   if (r.kod !== 200) return { hata: 'Oyunda yazılamadı: ' + (r.veri?.hata || r.kod) }
-  return { komut, sifreli: SIFRELI_KOMUT.test(sadeKomut(komut)) }
+  return { ok: true }
 }
 
 // ---------- ODAYA YAZILANLAR ----------
@@ -1838,11 +1852,29 @@ const icerikUyarildi = new Map() // userId -> zaman: yazılanı okuyamıyoruz uy
 async function odaMesaji(m) {
   if (kurulumModu || m.guildId !== GUILD_ID || m.author?.bot || m.system || m.webhookId) return
   const l = depo.kanaldanBul(m.channelId)
-  if (!l || l.userId !== m.author.id || !depo.aktifMi(l)) return
+  if (!l || l.userId !== m.author.id) return
+  // odaya key yazdıysa (süre uzatma): bota/oyuna gitmesin, key olarak işlensin
+  const key = String(m.content || '').match(KEY_RE)?.[0]
+  if (key) {
+    await m.delete().catch(() => {})
+    const r = await keyIsle(m.author, m.guild, key, 'müşteri odası')
+    await m.channel.send({ content: `<@${m.author.id}> ${r.ok ? '✅' : '❌'} ${r.metin}`, allowedMentions: { users: [m.author.id] } }).catch(() => {})
+    if (r.ok) await dmGonder(m.author.id, `Yaren: ${r.metin}`)
+    return
+  }
+  if (!depo.aktifMi(l)) return
   const benim = new RegExp(`<@!?${client.user.id}>`, 'g')
-  // başkasını etiketlediyse (ör. satıcıya yazıyor) bota söylenmiş sayma
+  // başkasını etiketlediyse ya da başkasının mesajına yanıt yazdıysa (ör. satıcıyla konuşuyor) bota söylenmiş sayma
   if (m.mentions?.everyone || m.mentions?.roles?.size || [...(m.mentions?.users?.keys() || [])].some((id) => id !== client.user.id)) return
-  const metin = String(m.content || '').replace(benim, ' ').trim()
+  if (m.mentions?.repliedUser && m.mentions.repliedUser.id !== client.user.id) return
+  let metin = String(m.content || '').replace(benim, ' ').trim()
+  // "/komut warp x" ya da "/yaz mesaj:selam" komut seçilmeden düz mesaj olarak gittiyse
+  let sohbet = false
+  const kalip = metin.match(/^\/(komut|yaz)\s+(?:(?:komut|mesaj):\s*)?(\S[\s\S]*)$/i)
+  if (kalip) {
+    sohbet = kalip[1].toLowerCase() === 'yaz' && !kalip[2].startsWith('/')
+    metin = sohbet ? kalip[2] : '/' + kalip[2].replace(/^\//, '')
+  }
   if (!metin) {
     // Message Content Intent kapalıysa yazılanı göremeyiz: arada bir söyle
     if (!mesajOkunur && !m.attachments?.size && Date.now() - (icerikUyarildi.get(l.userId) || 0) > 10 * 60000) {
@@ -1858,12 +1890,19 @@ async function odaMesaji(m) {
     }
     return
   }
+  // şifre olabilecek komut ("/login ..."): ne olursa olsun mesaj hemen silinir, cevap alıntılamaz
+  const sifreli = !sohbet && metin.startsWith('/') && sifreliKomut(oyunKomutu(metin))
+  const silindi = sifreli ? await m.delete().then(() => true, () => false) : false
   let sira = odaSirasi.get(l.userId)
   if (!sira) odaSirasi.set(l.userId, (sira = { is: Promise.resolve(), bekleyen: 0 }))
-  if (sira.bekleyen >= 3) return m.react('⏳').catch(() => {}) // art arda çok yazdı
+  if (sira.bekleyen >= 3) {
+    // art arda çok yazdı
+    if (sifreli) return m.channel.send({ content: 'Çok hızlı yazdın, o komut yazılmadı. Biraz bekleyip tekrar yaz.', allowedMentions: { parse: [] } }).catch(() => {})
+    return m.react('⏳').catch(() => {})
+  }
   sira.bekleyen++
   sira.is = sira.is
-    .then(() => odaMesajiIsle(m, l.userId, metin))
+    .then(() => odaMesajiIsle(m, l.userId, metin, { sifreli, silindi, sohbet }))
     .catch((e) => console.error('Oda mesajı:', e))
     .finally(() => {
       sira.bekleyen--
@@ -1872,26 +1911,32 @@ async function odaMesaji(m) {
 }
 client.on(Events.MessageCreate, (m) => odaMesaji(m).catch((e) => console.error('Oda mesajı:', e)))
 
-async function odaMesajiIsle(m, uid, metin) {
-  const yaz = (content, yanit = true) => {
+async function odaMesajiIsle(m, uid, metin, { sifreli = false, silindi = false, sohbet = false } = {}) {
+  // şifreli komutta cevap mesajı alıntılamaz (yanıt önizlemesinde şifre görünmesin)
+  const yaz = (content) => {
     const govde = { content: content.length > 2000 ? content.slice(0, 1997) + '…' : content, allowedMentions: { parse: [] } }
     const gonder = () => m.channel.send(govde).catch(() => {})
-    return yanit ? m.reply({ ...govde, allowedMentions: { parse: [], repliedUser: false } }).catch(gonder) : gonder()
+    return sifreli ? gonder() : m.reply({ ...govde, allowedMentions: { parse: [], repliedUser: false } }).catch(gonder)
   }
+  const sil = sifreli ? (silindi ? ' Şifre içerebileceği için mesajını sildim.' : ' Mesajını silemedim (izin yok): şifreyse kendin sil.') : ''
   const l = depo.bul(uid)
   if (!l || !depo.aktifMi(l)) return
-  if (!yonetici.calisiyor(uid)) return yaz('Botun çalışmıyor. Önce `/baslat` yaz.')
+  if (!yonetici.calisiyor(uid)) return yaz('Botun çalışmıyor. Önce `/baslat` yaz.' + sil)
+
+  // "/yaz mesaj:selam" düz mesaj olarak geldiyse: oyun sohbetine yazılır
+  if (sohbet) {
+    const r = await yonetici.istek(uid, 'yaz', { metin })
+    if (r.kod !== 200) return yaz('Oyunda yazılamadı: ' + (r.veri?.hata || r.kod))
+    return yaz(`Oyunda yazıldı: ${metin}`)
+  }
 
   // "/warp xanaxgod": oyunda komut
   if (metin.startsWith('/')) {
-    const r = await oyundaCalistir(uid, metin)
-    if (r.hata) return yaz(r.hata)
-    if (r.sifreli) {
-      // şifre odada kalmasın
-      await m.delete().catch(() => {})
-      return yaz('Komut oyunda yazıldı. Şifre içerebileceği için mesajını sildim.', false)
-    }
-    return yaz(`🎮 Oyunda yazıldı: ${kodYaz(r.komut)}${l.sohbetKapali ? SOHBET_KAPALI_NOTU : ''}`)
+    const komut = oyunKomutu(metin)
+    const r = await oyundaCalistir(uid, komut)
+    if (r.hata) return yaz(r.hata + sil)
+    if (sifreli) return yaz('Komut oyunda yazıldı.' + sil)
+    return yaz(`🎮 Oyunda yazıldı: ${kodYaz(komut)}${l.sohbetKapali ? SOHBET_KAPALI_NOTU : ''}`)
   }
 
   // "!maden", "!sandik ekle": oyun içi komut

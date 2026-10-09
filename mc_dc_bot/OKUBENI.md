@@ -13,7 +13,9 @@ ayrı çalışır.
   "maden kaz", "taş kır", "gel", "dur", "durum". Cevabı mesaja yanıt olarak gelir.
   Yapay zeka kapalıyken de anlar. Odaya `/warp xanaxgod` yazarsa bot oyunda o komutu
   yazar, `!maden` gibi oyun komutları da olur. Sadece odanın sahibinin yazdıkları
-  işlenir; başkasını etiketlediği mesajlara (sana yazdıklarına) karışmaz.
+  işlenir; başkasını etiketlediği ya da yanıtladığı mesajlara (sana yazdıklarına)
+  karışmaz. `/login şifre` gibi mesajlar hemen silinir. Odaya key yazarsa key
+  olarak işlenir (süresi uzar).
 - **`/komut`:** `/komut komut:warp xanaxgod` yazınca bot oyunda `/warp xanaxgod`
   yazar. Şifre içerebilecek komutlar (`/login`, `/register`...) odada gösterilmez.
 - **Maden görevi (`!maden`):** kömür, demir, bakır, altın, kızıltaş, lapis, elmas,
@@ -255,12 +257,15 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
 - **Sandık göstermediysen:** topladıklarını görevin başladığı yere en yakın (32 blok
   içindeki) sandığa götürür. Oraya sadece o işte topladıklarını bırakır; yanında
   getirdiği eşyalara ve aletlerine dokunmaz, oradan alet almaz (başkasının sandığı
-  olabilir). Açamadığı ya da dolu sandığı atlayıp sıradakini dener. Bu sandık
-  kaydedilmez: başka yerde iş verince oradaki en yakın sandık kullanılır.
-- **Boşaltma:** bir yığın (64) topladığında ya da envanter yarı dolunca (36 yuvanın
-  18'i) topladıklarını sandığa bırakır ve işine geri döner; iş kendiliğinden
-  bitince (süre doldu, yakında kalmadı) de götürür. `!dur` deyince götürmez.
-  `!bosalt` (ya da odaya "sandığa koy") ile hemen boşaltır.
+  olabilir). Giderken duvar kırmaz, blok koymaz; tuzaklı sandığı açmaz. Açamadığı
+  ya da dolu sandığı atlayıp sıradakini dener. Sandığın yeri oyun sohbetine değil
+  sadece müşterinin odasına yazılır. Bu sandık kaydedilmez: başka yerde iş verince
+  oradaki en yakın sandık kullanılır.
+- **Boşaltma:** bir yığın (64, yanında tuttukları hariç) topladığında, envanter
+  dolunca ya da (gösterdiğin sandıklarda) yarı dolunca topladıklarını sandığa bırakır
+  ve işine geri döner; iş kendiliğinden bitince (süre doldu, yakında kalmadı) de
+  götürür. `!dur` deyince götürmez, "topladıklarım yanımda" der. `!bosalt` (ya da
+  odaya "sandığa koy") ile hemen boşaltır.
   Yanında kalanlar: sağlam en iyi 2 aleti, 16 fidan, 32 tohum, 32 iskele bloğu
   (toprak/cobblestone), 16 yemek. Kırılmak üzere aletler (sağlamı varsa) tamir
   için sandığa gider. Zırh, yay gibi eşyalara dokunmaz.

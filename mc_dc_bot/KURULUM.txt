@@ -85,8 +85,9 @@ kanal varsa onu yeniden açar.
 
 YAPAY ZEKA (isteğe bağlı)
 ------------------------
-Yapay zeka olmadan da bot çalışır: odaya ya da oyunda "odun kes", "maden kaz",
-"gel", "dur", "sandığa bırak" gibi cümleleri kendisi anlar.
+Yapay zeka olmadan da bot çalışır: odaya "odun kes", "maden kaz", "gel", "dur",
+"sandığa koy" gibi cümleleri (oyunda başına Yaren ekleyerek: "Yaren odun kes")
+kendisi anlar.
 Serbest sohbet ve otonom mod (bot kendi karar verir) için yapay zeka lazım.
 Bunun parası sana çıkar (Anthropic'e). Açmak için:
  a. https://console.anthropic.com adresinde hesap aç (Google ile girilir).
