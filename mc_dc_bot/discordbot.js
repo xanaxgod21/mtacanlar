@@ -1866,7 +1866,7 @@ async function odaMesaji(m) {
   const benim = new RegExp(`<@!?${client.user.id}>`, 'g')
   // başkasını etiketlediyse ya da başkasının mesajına yanıt yazdıysa (ör. satıcıyla konuşuyor) bota söylenmiş sayma
   if (m.mentions?.everyone || m.mentions?.roles?.size || [...(m.mentions?.users?.keys() || [])].some((id) => id !== client.user.id)) return
-  if (m.mentions?.repliedUser && m.mentions.repliedUser.id !== client.user.id) return
+  if (m.mentions?.repliedUser && ![client.user.id, m.author.id].includes(m.mentions.repliedUser.id)) return
   let metin = String(m.content || '').replace(benim, ' ').trim()
   // "/komut warp x" ya da "/yaz mesaj:selam" komut seçilmeden düz mesaj olarak gittiyse
   let sohbet = false

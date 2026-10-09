@@ -227,6 +227,8 @@ const SANDIK_KOMUTLARI = [
   [/\bsandik(lar)?(in|im|larim)?\s+(liste|neler)|\bsandik listesi/, '!sandik liste'],
 ]
 function niyetBul(t) {
+  // "elmasları sandığa koyma": bırakma isteği değil
+  if (/\b(koy|birak|gotur|tasi|bosalt|depola)m[ae]\b/.test(t)) return 'birakma'
   if (KESIN_DUR_RE.test(t)) return '!dur'
   for (const [re, cmd] of SANDIK_KOMUTLARI) if (re.test(t)) return cmd
   if (/\bsandi[gk]\w*tan\b/.test(t)) return 'sandiktan' // "sandıktan al": yapamaz
@@ -270,6 +272,7 @@ function anahtarsizCevap(metin) {
   const t = sade(metin)
   if (/\botonom|kendi kendine|kendin karar/.test(t)) return 'Kendi kendime karar vermem için yapay zeka lazım (satıcı açabilir). Bana ne yapacağımı söyle: odun kes, maden kaz, tarla, gel...'
   const cmd = niyetBul(t)
+  if (cmd === 'birakma') return 'Tamam, sandığa bırakmıyorum.'
   if (cmd === 'sandiktan') return 'Sandıktan eşya almayı bilmiyorum, sadece sandığa bırakırım. (Kırılmak üzere olan aletimin yenisini gösterdiğin sandıktan kendim alırım.)'
   if (cmd) return komut(cmd) || 'Tamam.'
   if (/\b(selam|merhaba|sa\b|hey|naber)/.test(t)) return 'Merhaba! Ne yapayım? Odun keserim, maden kazarım, taş kırarım, tarla toplarım, yanına gelirim.'
@@ -411,7 +414,8 @@ async function bosaltTask(id) {
   if (!hedef.liste.length) {
     return gorevNotu(id, 'Yakında sandık göremiyorum. Beni bir sandığın yanına getir ya da sandığın dibinde dur ve !sandik ekle yaz.')
   }
-  if (!birakmaPlani(bot.inventory.items()).length) return gorevNotu(id, 'Sandığa bırakacak bir şeyim yok.')
+  // en yakın sandığa alet bırakılmaz: sadece aletler fazlaysa "bırakacak bir şey yok"
+  if (!birakmaPlani(bot.inventory.items(), hedef.oto ? envanterSayim() : null).length) return gorevNotu(id, 'Sandığa bırakacak bir şeyim yok.')
   // açıkça istendi: en yakın sandığa da (sadece bu görevde toplananları değil) fazlaların hepsi
   const r = await sandikZiyareti(id, { don: false, hepsi: true })
   if (!r.ulasilan) gorevNotu(id, hedef.oto ? 'Yakındaki sandıklara ulaşamadım ya da açamadım.' : 'Sandıklara ulaşamadım.')
@@ -1084,7 +1088,6 @@ async function sandikZiyareti(id, { alet = null, don = true, hepsi = false } = {
     }
   } finally {
     sandikta = false
-    if (hedef.oto) restoreMovements()
   }
   if (sonuc.birakilan) {
     // koordinat oyun sohbetine yazılmaz (herkes görür), sadece müşterinin odasına gider
@@ -1095,9 +1098,13 @@ async function sandikZiyareti(id, { alet = null, don = true, hepsi = false } = {
     uyar('sandik-dolu', hedef.oto ? 'Yakındaki sandık doldu. Boş bir sandık göster: dibinde dur, !sandik ekle.' : 'Sandıklarım doldu, yeni sandık göster (!sandik ekle).')
   }
   tabanGuncelle()
-  // işin olduğu yere dön
-  if (don && id === taskId && bot.entity.position.distanceTo(donus) > 3) {
-    await gotoTimeout(new goals.GoalNear(donus.x, donus.y, donus.z, 2), 60000).catch(() => {})
+  // işin olduğu yere dön (en yakın sandıktan dönerken de duvar kırmasın)
+  try {
+    if (don && id === taskId && bot.entity.position.distanceTo(donus) > 3) {
+      await gotoTimeout(new goals.GoalNear(donus.x, donus.y, donus.z, 2), 60000).catch(() => {})
+    }
+  } finally {
+    if (hedef.oto) restoreMovements()
   }
   return sonuc
 }
