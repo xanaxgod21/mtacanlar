@@ -11,7 +11,7 @@ ayrı çalışır.
 
 - **Tek komutla kurulum:** dosya düzenlemek yok. `baslat.bat` açılınca token'ı
   sorar (yapıştır, Enter), botu sunucuna ekleme linkini açar; sunucunda `/kur`
-  yazınca bot log kanallarını, Yaren Yetkili / Yaren Müşteri rollerini, key
+  yazınca bot log kanallarını, Yaren Log / Yaren Müşteri rollerini, key
   kanalını ve yönetim panelini kendisi açar, ayarları kaydeder.
 - **Sunucuya otomatik giriş:** sunucu girişte `/register` ya da `/login` isterse
   bot kendisi yazar. Müşteri şifreyi bir kere odasında `/giris sifre:...` ile verir.
@@ -50,17 +50,24 @@ Adım adım anlatım: **`KURULUM.txt`**. Kısaca, dosya düzenlemek yok:
    seç, Yetkilendir.
 5. Sunucunda herhangi bir kanala **`/kur`** yaz (sunucu sahibi ya da Yönetici).
    Bot kendisi açar ve `ayarlar.json`'a yazar:
-   - **Yaren Yönetim** kategorisi (sadece sen ve Yaren Yetkili): `#yaren-log`,
-     `#yaren-key-log`, `#yaren-yonetim` (yönetim paneli)
+   - **Yaren Yönetim** kategorisi (herkese kapalı): `#yaren-log`,
+     `#yaren-key-log` ve sadece senin gördüğün `#yaren-yonetim` (yönetim paneli)
    - herkese açık **`#key-gir`** ve içinde "Key Gir" paneli
-   - **@Yaren Yetkili** rolü: sana verilir; kime verirsen logları ve paneli görür,
-     key verip lisans yönetebilir
+   - **@Yaren Log** rolü: sana verilir; kime verirsen log kanallarını görür
+     (sadece okur, key veremez, paneli görmez)
    - **@Yaren Müşteri** rolü: key girene verilir, süresi bitince alınır
 
 `/kur`'u tekrar yazarsan var olanları kullanır, silinen kanalı yeniden açar.
 Kurulduktan sonra `/kur`'u sadece satıcı (ilk `/kur` yazan) yazabilir; satıcı
-sunucudan çıkmışsa sunucu sahibi devralır. Bot sunucudan atılırsa ayarlar durur,
-geri eklenince kaldığı yerden devam eder.
+sunucudan çıkmışsa sunucu sahibi devralır (eski satıcının kanal ve oda izinleri
+silinir). Bot sunucudan atılırsa ayarlar durur, geri eklenince kaldığı yerden
+devam eder; bu arada başka bir sunucunun sahibi botu ekleyip `/kur` ile ele
+geçiremez (sadece kayıtlı satıcı). Bot başka sunucuya taşınırsa müşteriler orada
+yeni oda alır, ayarları ve sandıkları kalır.
+
+Key verme ve lisans işleri satıcıya özeldir. Ekibine de bu yetkiyi vermek
+istersen bir rol aç, ID'sini `ayarlar.json`'da `yetkili_rol_id`'ye yaz (o rolü
+verebilen herkesin key basabileceğini unutma).
 
 **`baslat.bat`** kapanırsa botu 10 sn sonra yeniden açar. Bilgisayar/VPS
 kapanınca botlar da kapanır; açınca çalışan müşteri botları kendiliğinden geri gelir.
@@ -69,9 +76,10 @@ kapanınca botlar da kapanır; açınca çalışan müşteri botları kendiliği
 
 - `discord_token`: token (konsolda sorulur)
 - `guild_id`, `log_kanal_id`, `key_log_kanal_id`, `discord_sahip_id`,
-  `yetkili_rol_id`, `musteri_rol_id`: `/kur` doldurur. Key logu kim hangi keyi ne
+  `log_rol_id`, `musteri_rol_id`: `/kur` doldurur. Key logu kim hangi keyi ne
   zaman üretti, kime verdi, kim kullandı, kim iptal etti; lisans uzatma/bitirme/iptal
   ve süresi dolanlar saatiyle düşer, ayrıca `veri/key_log.txt` dosyasına yazılır.
+- `yetkili_rol_id`: elle (isteğe bağlı) — bu roldekiler de key verip lisans yönetir.
 - `gunluk_yedek`: `true` ise her gün yedek alınır ve sana DM ile gelir.
 - `oda_silme_saat`: süre bitince müşterinin odası kaç saat sonra silinsin
   (0 = hemen silinir; örneğin 24 yazarsan oda 1 gün kilitli bekler, sonra silinir)

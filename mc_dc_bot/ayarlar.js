@@ -18,11 +18,13 @@ function oku(dosya) {
 }
 
 let json = {}
+let bozukHata = '' // ayarlar.json var ama okunamıyorsa nedeni (bot açılmaz, düzeltilmesini ister)
 const ham = oku('ayarlar.json')
 if (ham) {
   try {
     json = JSON.parse(ham)
   } catch (e) {
+    bozukHata = e.message
     console.log('[ayar] ayarlar.json bozuk, okunamadı:', e.message)
   }
 }
@@ -44,7 +46,7 @@ const sayi = (envAdi, jsonAdi, varsayilan) => {
 
 // Bot kendisi ayar yazar (konsola yapıştırılan token, /kur'un açtığı kanal ve
 // roller): ayarlar.json yoksa örnekten oluşturur, sadece verilen alanları değiştirir.
-// Dosya bozuksa üstüne yazmaz, ayarlar.bozuk.json adıyla saklar.
+// Dosya bozuksa üstüne yazmaz (içindeki anahtarlar kaybolmasın), hata verir.
 function kaydet(degisen) {
   const dosya = path.join(__dirname, 'ayarlar.json')
   let mevcut = null
@@ -52,9 +54,8 @@ function kaydet(degisen) {
   if (metin) {
     try {
       mevcut = JSON.parse(metin)
-    } catch (_) {
-      fs.copyFileSync(dosya, path.join(__dirname, 'ayarlar.bozuk.json'))
-      console.log('[ayar] ayarlar.json bozuktu, ayarlar.bozuk.json adıyla saklandı, yenisi yazılıyor.')
+    } catch (e) {
+      throw new Error(`ayarlar.json bozuk (${e.message}), üstüne yazılmadı`)
     }
   }
   if (!mevcut) {
@@ -65,13 +66,23 @@ function kaydet(degisen) {
     }
   }
   Object.assign(mevcut, degisen)
-  fs.writeFileSync(dosya + '.tmp', JSON.stringify(mevcut, null, 2) + '\n', 'utf-8')
-  fs.renameSync(dosya + '.tmp', dosya)
+  try {
+    fs.writeFileSync(dosya + '.tmp', JSON.stringify(mevcut, null, 2) + '\n', 'utf-8')
+    fs.renameSync(dosya + '.tmp', dosya)
+  } catch (e) {
+    fs.rmSync(dosya + '.tmp', { force: true }) // token'lı geçici dosya ortada kalmasın
+    throw e
+  }
   json = mevcut
 }
 
+// Değer ortam değişkeninden mi geliyor (öyleyse dosyaya yazılan değer kullanılmaz)
+const envden = (envAdi) => !bosMu(env[envAdi])
+
 module.exports = {
   kaydet,
+  envden,
+  bozuk: bozukHata,
   discordToken: al('DISCORD_TOKEN', 'discord_token'),
   guildId: al('GUILD_ID', 'guild_id'),
   logKanalId: al('LOG_CHANNEL_ID', 'log_kanal_id'), // satıcı logu (satışlar, hatalar)
@@ -79,6 +90,7 @@ module.exports = {
   discordSahipId: al('DISCORD_OWNER_ID', 'discord_sahip_id'), // satıcı (admin)
   yetkiliRolId: al('YETKILI_ROL_ID', 'yetkili_rol_id'), // bu roldekiler de key verebilir (boş = sadece sen)
   musteriRolId: al('MUSTERI_ROL_ID', 'musteri_rol_id'), // key girene verilir, süre bitince alınır (boş = kapalı)
+  logRolId: al('LOG_ROL_ID', 'log_rol_id'), // log kanallarını görür (key veremez); /kur açar
   gunlukYedek: !['0', 'false', 'hayir', 'hayır'].includes(al('GUNLUK_YEDEK', 'gunluk_yedek', '1').toLowerCase()), // her gün yedek DM'i
   odaSilmeSaat: sayi('ODA_SILME_SAAT', 'oda_silme_saat', 0), // süre bitince oda kaç saat sonra silinsin (0 = hemen)
   musteriKategoriId: al('MUSTERI_KATEGORI_ID', 'musteri_kategori_id'), // boşsa bot açar

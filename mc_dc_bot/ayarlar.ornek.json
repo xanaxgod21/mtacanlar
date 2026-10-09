@@ -6,6 +6,7 @@
   "discord_sahip_id": "",
   "yetkili_rol_id": "",
   "musteri_rol_id": "",
+  "log_rol_id": "",
   "gunluk_yedek": true,
   "oda_silme_saat": 0,
   "musteri_kategori_id": "",

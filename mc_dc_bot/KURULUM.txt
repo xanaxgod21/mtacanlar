@@ -24,7 +24,9 @@ Kanalları, rolleri ve panelleri bot kendisi açar. Toplam 5-10 dk.
  b. https://nodejs.org > "LTS" sürümünü indir, hep "Next" diyerek kur.
  c. Çıkardığın klasördeki "MC_DC_BOT" klasörüne gir, "baslat.bat"
     dosyasına çift tıkla (uzantılar gizliyse adı "baslat" görünür).
-    İlk açılışta gerekli paketleri indirir (1-2 dk).
+    İlk açılışta gerekli paketleri indirir (1-2 dk). Pencereyi bu sırada
+    kapatırsan sorun değil, bir dahaki açılışta baştan indirir.
+    Sadece baslat.bat'ı aç; aynı anda iki pencere açma.
     Mavi "Windows kişisel bilgisayarınızı korudu" penceresi çıkarsa:
     "Ek bilgi" > "Yine de çalıştır".
 
@@ -32,10 +34,10 @@ Kanalları, rolleri ve panelleri bot kendisi açar. Toplam 5-10 dk.
 3) TOKEN'I YAPIŞTIR
 -------------------
 Siyah pencere "Token:" diye sorar. 1-c'de kopyaladığın token'ı yapıştır
-(sağ tık ya da Ctrl+V) ve Enter'a bas.
+(sağ tık ya da Ctrl+V) ve Enter'a bas. Yapıştırınca ekranda görünmez, bu
+normal (token gizli kalsın diye).
  - Doğruysa "Token kaydedildi" der, bir daha sormaz.
  - Yanlışsa nedenini söyler, tekrar sorar.
- - Yapıştırdığın token ekranda gizlenir.
  - Sonradan Developer Portal'da "Reset Token" yaparsan bot bir sonraki
    açılışta eskisinin geçmediğini anlar, yenisini sorar.
 
@@ -55,14 +57,19 @@ Sunucunda herhangi bir kanala yaz:
 (Sunucu sahibi ya da Yönetici yetkisi olan biri yazmalı. Cevabı sadece sen
  görürsün.) Bot şunları kendisi açar ve ayarları kaydeder:
 
- "Yaren Yönetim" kategorisi (sadece sen ve Yaren Yetkili rolü görür):
+ "Yaren Yönetim" kategorisi (herkese kapalı):
    #yaren-log       satışlar, botların açılıp kapanması, hatalar
    #yaren-key-log   kim hangi keyi ne zaman üretti / verdi / kullandı
-   #yaren-yonetim   butonlu yönetim paneli (key ver, süre uzat/bitir)
+   #yaren-yonetim   butonlu yönetim paneli (key ver, süre uzat/bitir);
+                    sadece sen görürsün
  #key-gir           herkese açık: müşteriler keyini buraya yazar
- @Yaren Yetkili     sana verilir. Kime verirsen o da log kanallarını ve
-                    paneli görür, key verebilir (ekibin için).
+ @Yaren Log         sana verilir. Kime verirsen o da log kanallarını görür
+                    (sadece okur; key veremez, paneli görmez).
  @Yaren Müşteri     key girene otomatik verilir, süresi bitince alınır.
+
+Key verme ve süre işleri sadece sende (/kur'u ilk yazan kişi). Rolleri
+Yönet izni olan biri kendine rol verip key basamasın diye bu yetki rolle
+dağıtılmaz.
 
 Hepsi bu kadar. /kur'u tekrar yazarsan var olanları kullanır, silinmiş bir
 kanal varsa onu yeniden açar.
@@ -108,12 +115,17 @@ SORUN ÇIKARSA (siyah pencerede ya da Discord'da yazan)
      -> Botun Yönetici izni yok. Cevaptaki linki aç, "Yetkilendir" de
         (botu atmana gerek yok), sonra tekrar /kur yaz.
  "Kurulumu sadece satıcı (ilk /kur yazan kişi) değiştirebilir."
-     -> Kurulumu ilk /kur yazan kişi yaptı; o yazmalı.
+     -> Kurulumu ilk /kur yazan kişi yaptı; o yazmalı. O kişi sunucudan
+        çıktıysa sunucu sahibi /kur yazıp devralabilir.
+ "Bu bot daha önce kuruldu: /kur'u sadece satıcısı yazabilir."
+     -> Bot sunucudan atılmış ya da başka sunucuya taşınıyor. Güvenlik için
+        sadece ilk /kur yazan kişi yeniden kurabilir (başkası botu kendi
+        sunucusuna ekleyip müşterilerini ele geçiremesin).
  "Yaren henüz kurulmadı: sunucu sahibi bir kanala /kur yazsın."
      -> Adım 5'i yap.
  "... rolü botun rolünden yukarıda, bot bu rolü veremez"
      -> Sunucu Ayarları > Roller: "Yaren" rolünü tutup en üste yakın
-        sürükle (Yaren Yetkili ve Yaren Müşteri'nin üstüne), kaydet.
+        sürükle (Yaren Log ve Yaren Müşteri'nin üstüne), kaydet.
  "Message Content Intent kapalı"
      -> Sorun değil, bot çalışır; müşteriler "Key Gir" butonuyla girer.
         Kanala yazarak da girsinler istersen: Developer Portal > Bot >
@@ -121,6 +133,17 @@ SORUN ÇIKARSA (siyah pencerede ya da Discord'da yazan)
         (Bot bunu çoğu zaman kendisi açar.)
  Bot sunucudan atıldıysa
      -> Adım 4'teki linkle geri ekle; ayarlar durduğu için kaldığı yerden
-        devam eder.
+        devam eder. Bot yokken key kanalına yazılan keyler geri gelince
+        sahiplerine işlenir.
+ "ayarlar.json bozuk, okunamadı"
+     -> Dosyayı elle değiştirirken bir virgül/tırnak bozulmuş. Not Defteri
+        ile düzelt, kaydet, siyah pencerede bir tuşa bas. Düzeltemezsen
+        ayarlar.json'u sil: bot token'ı yeniden sorar, /kur'u tekrar
+        yazarsın (müşteriler veri klasöründe, kaybolmaz).
+ "Token geçersiz oldu"
+     -> Developer Portal'da token sıfırlanmış. Bot kendini yeniden açar ve
+        yeni token'ı sorar.
+ Token yapıştırırken ekranda bir şey görünmüyor
+     -> Normal, token gizli tutuluyor. Yapıştır ve Enter'a bas.
 
 Bütün komutlar ve özellikler: OKUBENI.md

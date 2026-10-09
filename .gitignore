@@ -6,6 +6,8 @@ __pycache__/
 
 # MC DC BOT: gizli ayarlar ve çalışma verisi
 mc_dc_bot/ayarlar.json
+mc_dc_bot/ayarlar.json.*
+mc_dc_bot/ayarlar.bozuk*.json
 mc_dc_bot/anahtar.txt
 mc_dc_bot/deneyim.json
 mc_dc_bot/deneyim.json.*

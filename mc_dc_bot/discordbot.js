@@ -23,6 +23,7 @@
 const fs = require('fs')
 const net = require('net')
 const readline = require('readline')
+const { Writable } = require('stream')
 const { spawn } = require('child_process')
 const zlib = require('zlib')
 const path = require('path')
@@ -379,11 +380,15 @@ function odaIzinleri(guild, userId, acik) {
         PermissionFlagsBits.ReadMessageHistory,
       ],
     },
-    {
-      id: ADMIN_ID,
-      type: OverwriteType.Member,
-      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-    },
+    ...(ADMIN_ID
+      ? [
+          {
+            id: ADMIN_ID,
+            type: OverwriteType.Member,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+          },
+        ]
+      : []),
     ...(yetkiliRol
       ? [
           {
@@ -577,7 +582,16 @@ async function keyIsle(user, guild, key, kaynak = '') {
 // O bitene kadar buton/komutla key girenler bekler: kanalda görünen bir keyi
 // başkası bot açılır açılmaz /key-gir ile kapamasın.
 let birikmisBitti
-const birikmisHazir = new Promise((r) => (birikmisBitti = r))
+let birikmisHazir
+// Kapıyı kapatır: kanalda bekleyen keyler işlenene kadar (en fazla 1 dk) yeni girişler bekler.
+// Açılışta ve sunucuya (yeniden) kurulunca kapanır.
+function kapiyiKapat() {
+  let bitti
+  birikmisHazir = new Promise((r) => (bitti = r))
+  birikmisBitti = bitti
+  setTimeout(bitti, 60000) // bir şey takılsa da en geç 1 dk sonra key girişi açılır
+}
+kapiyiKapat()
 
 async function keyKullan(i, key) {
   await i.deferReply({ flags: MessageFlags.Ephemeral })
@@ -833,14 +847,12 @@ const davetLinki = (guildId) =>
 
 client.once(Events.ClientReady, async () => {
   console.log(`Discord botu hazır: ${client.user.tag}`)
-  setTimeout(birikmisBitti, 60000) // aşağıda bir şey takılsa da en geç 1 dk sonra key girişi açılır
   if (GUILD_ID && client.guilds.cache.has(GUILD_ID)) await sunucuyuBaslat()
   else await kurulumModunaGec()
 })
 
 async function kurulumModunaGec() {
   kurulumModu = true
-  birikmisBitti() // kurulu sunucu yokken key kanalı da yok
   const sunucular = [...client.guilds.cache.values()]
   for (const g of sunucular) {
     await g.commands.set([KUR_KOMUTU]).catch((e) => console.error(`/kur "${g.name}" sunucusuna kaydedilemedi: ${e.message}`))
@@ -878,6 +890,7 @@ client.on(Events.GuildCreate, async (g) => {
       // atılan bot aynı sunucuya geri eklendi: ayarlar duruyor, kaldığı yerden devam
       if (kurulumModu) {
         console.log(`Bot tekrar "${g.name}" sunucusunda, kaldığı yerden devam ediyor.`)
+        kapiyiKapat() // yokken key kanalına yazılanlar önce sahiplerine
         kurulumModu = false
         await sunucuyuBaslat()
       }
@@ -890,6 +903,20 @@ client.on(Events.GuildCreate, async (g) => {
     console.error(`Sunucuya eklenince hata (${g.name}): ${e.message}`)
   }
 })
+// Token sıfırlandı (4004) ya da Message Content Intent kapatıldı (4014): Discord bağlantıyı
+// kalıcı keser, discord.js yeniden denemez. Çık: baslat.bat / pm2 yeniden açar, açılışta
+// token sorulur ya da intent yeniden denetlenir.
+client.on(Events.ShardDisconnect, (olay) => {
+  const neden =
+    olay?.code === 4004
+      ? 'Token geçersiz oldu (Developer Portal\'da sıfırlanmış olabilir). Yeniden açılınca yenisi sorulacak.'
+      : olay?.code === 4014
+        ? 'Message Content Intent kapatılmış. Yeniden açılınca bot buna göre ayarlanır.'
+        : `Discord bağlantıyı kalıcı kapattı (kod ${olay?.code}).`
+  console.error('⚠️ ' + neden)
+  process.exit(1)
+})
+
 client.on(Events.GuildDelete, (g) => {
   if (g.id !== GUILD_ID || kurulumModu) return
   console.error(`⚠️ Bot "${g.name || g.id}" sunucusundan çıkarıldı. Geri eklersen kaldığı yerden devam eder.`)
@@ -920,7 +947,7 @@ async function sunucuyuBaslat() {
     if (KEY_LOG_KANAL_ID) {
       const kl = await kanalGetir(KEY_LOG_KANAL_ID).catch(() => null)
       if (!kl) adminLog(`⚠️ key_log_kanal_id (${KEY_LOG_KANAL_ID}) bulunamadı, key logları bu kanala düşecek.`)
-      else if (herkeseAcik(kl, guild)) adminLog('⚠️ Key log kanalını herkes görebiliyor (müşteri adları ve key önekleri orada). Kanalı sadece sana ve yetkililere aç.')
+      else if (herkeseAcik(kl, guild, [LOG_ROL_ID].filter(Boolean))) adminLog('⚠️ Key log kanalını herkes görebiliyor (müşteri adları ve key önekleri orada). Kanalı sadece sana ve yetkililere aç.')
     }
     // Eksik izin varsa key yanmadan önce satıcı bilsin
     const ben = guild.members?.me ?? (await guild.members?.fetchMe?.().catch(() => null))
@@ -946,11 +973,12 @@ async function sunucuyuBaslat() {
   } catch (e) {
     console.error(`Slash komutları kaydedilemedi (${e.message}). guild_id doğru mu, bot o sunucuda mı?`)
   }
-  if (sunucuBasladi) return
-  sunucuBasladi = true
-  // içerik okunamasa da (Message Content Intent kapalı) kanalda kalan mesajlar silinir
+  // Bot kapalıyken (ya da sunucudan atılmışken) key kanalına yazılanlar: keyler sahiplerine
+  // işlenir, mesajlar silinir. İçerik okunamasa da (Message Content Intent kapalı) silinir.
   await kacanKeyMesajlari().catch((e) => console.error('Key kanalı:', e.message))
   birikmisBitti()
+  if (sunucuBasladi) return
+  sunucuBasladi = true
   await zamanKontrol().catch((e) => console.error('Süre kontrolü:', e.message))
   panelGuncelle()
   setTimeout(() => gunlukYedek().catch(() => {}), 60000) // son yedek 1 günden eskiyse
@@ -980,18 +1008,19 @@ async function yetkiliOdalaraEkle() {
 }
 
 // ---------- /kur: TEK KOMUTLA KURULUM ----------
-// "Yaren Yönetim" kategorisinde log, key log ve yönetim paneli kanallarını (sadece
-// satıcı ve Yaren Yetkili rolü görür), Yaren Yetkili ve Yaren Müşteri rollerini,
-// herkese açık key kanalını açar; yetkili rolünü /kur yazana verir, ID'leri
-// ayarlar.json'a yazar. Tekrar yazılırsa var olanları kullanır, silinmiş olanları
-// yeniden açar.
+// "Yaren Yönetim" kategorisinde log, key log ve yönetim paneli kanallarını, "Yaren
+// Log" (log kanallarını görür, key veremez) ve "Yaren Müşteri" rollerini, herkese
+// açık key kanalını açar; log rolünü /kur yazana verir, ID'leri ayarlar.json'a
+// yazar. Tekrar yazılırsa var olanları kullanır, silinmiş olanları yeniden açar.
+// Key verme yetkisi rolle dağıtılmaz (Rolleri Yönet izni olan biri kendine verip key
+// basamasın): satıcı ve elle ayarlanan yetkili_rol_id'dekiler.
 const KUR_AD = {
   kategori: 'Yaren Yönetim',
   log: 'yaren-log',
   keyLog: 'yaren-key-log',
   yonetim: 'yaren-yonetim',
   keyKanali: 'key-gir',
-  yetkili: 'Yaren Yetkili',
+  logRol: 'Yaren Log',
   musteri: 'Yaren Müşteri',
 }
 const BOT_OZEL_IZIN = [
@@ -1002,14 +1031,16 @@ const BOT_OZEL_IZIN = [
   PermissionFlagsBits.AttachFiles,
   PermissionFlagsBits.ManageMessages,
 ]
-const YETKILI_KANAL_IZIN = [
+const SATICI_KANAL_IZIN = [
   PermissionFlagsBits.ViewChannel,
   PermissionFlagsBits.SendMessages,
   PermissionFlagsBits.ReadMessageHistory,
   PermissionFlagsBits.UseApplicationCommands,
 ]
+const LOG_ROL_IZIN = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory]
 const izinNesnesi = (liste) => Object.fromEntries(liste.map((f) => [Object.keys(PermissionFlagsBits).find((k) => PermissionFlagsBits[k] === f), true]))
 let kuruluyor = false
+let LOG_ROL_ID = ayarlar.logRolId
 
 // Kişi sunucuda mı (sunucudan çıkmışsa false; Discord'a ulaşılamazsa hata)
 async function uyeMi(guild, userId) {
@@ -1034,17 +1065,25 @@ async function kurKomutu(i) {
     await i.deferReply({ flags: MessageFlags.Ephemeral })
     const sahibi = i.user.id === guild.ownerId
     const yoneticiMi = !!i.memberPermissions?.has(PermissionFlagsBits.Administrator)
-    // Kurulu sunucuda sadece satıcı; satıcı sunucudan çıkmışsa (ya da hiç yoksa) sunucu sahibi devralır
-    const izin = kurulu
-      ? (ADMIN_ID && i.user.id === ADMIN_ID) || (sahibi && !(await uyeMi(guild, ADMIN_ID)))
-      : sahibi || yoneticiMi
-    if (!izin) {
-      return i.editReply(
-        kurulu
-          ? 'Kurulumu sadece satıcı (ilk /kur yazan kişi) değiştirebilir.'
-          : "/kur'u sadece sunucu sahibi ya da Yönetici yetkisi olan biri yazabilir."
-      )
+    let izin
+    let red
+    if (kurulu) {
+      // Kurulu sunucuda sadece satıcı; satıcı sunucudan çıkmışsa (ya da hiç yoksa) sunucu sahibi devralır
+      izin = (ADMIN_ID && i.user.id === ADMIN_ID) || (sahibi && !(await uyeMi(guild, ADMIN_ID)))
+      red = 'Kurulumu sadece satıcı (ilk /kur yazan kişi) değiştirebilir.'
+    } else if (ADMIN_ID) {
+      // Daha önce kurulmuş bot (atılmış ya da taşınıyor): başka bir sunucunun sahibi/yöneticisi
+      // /kur yazıp satıcının müşterilerini, keylerini ele geçiremesin
+      izin = i.user.id === ADMIN_ID
+      red = "Bu bot daha önce kuruldu: /kur'u sadece satıcısı yazabilir. (Satıcı sensen ve bu hesap değilse ayarlar.json'da discord_sahip_id'yi düzelt.)"
+    } else if (GUILD_ID && guild.id !== GUILD_ID && depo.ozetListe().lisanslar.length) {
+      izin = false
+      red = "Bu botun başka bir sunucuda müşterileri var. Taşımak için ayarlar.json'a discord_sahip_id olarak kendi ID'ni yaz, botu yeniden aç."
+    } else {
+      izin = sahibi || yoneticiMi // ilk kurulum
+      red = "/kur'u sadece sunucu sahibi ya da Yönetici yetkisi olan biri yazabilir."
     }
+    if (!izin) return i.editReply(red)
     return await kurulumYap(i, guild)
   } catch (e) {
     console.error('/kur hatası:', e)
@@ -1070,10 +1109,11 @@ async function kanalBulYaDaAc(guild, hepsi, id, ad, ozellik) {
   return { kanal: await guild.channels.create({ name: ad, reason: 'Yaren /kur', ...ozellik }), yeni: true }
 }
 
-// Var olan (kullanılan) özel kanalda bot ve yetkili rolü de görsün
-async function ozelKanalIzinleri(kanal, yetkiliRolId) {
+// Var olan (kullanılan) özel kanala da bot, satıcı ve verilen roller erişsin
+async function ozelKanalIzinleri(kanal, saticiId, roller) {
   await kanal.permissionOverwrites.edit(client.user.id, izinNesnesi(BOT_OZEL_IZIN), { type: OverwriteType.Member })
-  await kanal.permissionOverwrites.edit(yetkiliRolId, izinNesnesi(YETKILI_KANAL_IZIN), { type: OverwriteType.Role })
+  await kanal.permissionOverwrites.edit(saticiId, izinNesnesi(SATICI_KANAL_IZIN), { type: OverwriteType.Member })
+  for (const [rolId, izinler] of roller) await kanal.permissionOverwrites.edit(rolId, izinNesnesi(izinler), { type: OverwriteType.Role })
 }
 
 // Kanalda botun koyduğu "Key Gir" paneli duruyor mu (tekrar /kur'da ikincisi atılmasın)
@@ -1087,6 +1127,21 @@ async function keyPaneliVarMi(kanal) {
   )
 }
 
+// Satıcı değişti (sunucu sahibi devraldı): eskisi log kanallarını, paneli ve
+// müşteri odalarını artık görmesin, yenisi görsün
+async function saticiDegisti(eski, yeni, ozelKanallar) {
+  const neden = 'Yaren /kur: satıcı değişti'
+  for (const k of ozelKanallar) await k?.permissionOverwrites?.delete(eski, neden).catch(() => {})
+  for (const l of depo.ozetListe().lisanslar) {
+    const oda = await kanalGetir(l.kanalId).catch(() => null)
+    if (!oda) continue
+    if (l.userId !== eski) await oda.permissionOverwrites.delete(eski, neden).catch(() => {}) // kendi odasıysa kalsın
+    await oda.permissionOverwrites
+      .edit(yeni, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }, { type: OverwriteType.Member })
+      .catch((e) => adminLog(`⚠️ Yeni satıcıya oda izni verilemedi (#${oda.name}): ${e.message}`))
+  }
+}
+
 async function kurulumYap(i, guild) {
   const notlar = []
   const ben = guild.members?.me ?? (await guild.members.fetchMe())
@@ -1095,7 +1150,7 @@ async function kurulumYap(i, guild) {
   const eksik = ben.permissions.missing([
     ...new Set([
       ...BOT_OZEL_IZIN,
-      ...YETKILI_KANAL_IZIN,
+      ...SATICI_KANAL_IZIN,
       PermissionFlagsBits.ManageChannels,
       PermissionFlagsBits.ManageRoles,
       PermissionFlagsBits.CreatePublicThreads,
@@ -1109,54 +1164,72 @@ async function kurulumYap(i, guild) {
     )
   }
   const ayniSunucu = GUILD_ID === guild.id // değilse eski ID'ler başka sunucunun, kullanılmaz
+  const eskiSatici = ayniSunucu ? ADMIN_ID : ''
+  const satici = i.user.id
 
   // Roller
   await guild.roles.fetch().catch(() => null) // adla bulabilmek için hepsini al
-  const yetkili = await rolBulYaDaAc(guild, ayniSunucu ? YETKILI_ROL_ID : '', KUR_AD.yetkili)
+  const logRol = await rolBulYaDaAc(guild, ayniSunucu ? LOG_ROL_ID : '', KUR_AD.logRol)
   const musteri = await rolBulYaDaAc(guild, ayniSunucu ? MUSTERI_ROL_ID : '', KUR_AD.musteri)
   const botUst = ben.roles?.highest?.position ?? Infinity
-  for (const { rol } of [yetkili, musteri]) {
+  for (const { rol } of [logRol, musteri]) {
     if (rol.position >= botUst) {
       notlar.push(`⚠️ "${rol.name}" rolü botun rolünden yukarıda, bot bu rolü veremez. Sunucu Ayarları > Roller'de Yaren rolünü onun üstüne sürükle.`)
     }
   }
+  // elle ayarlanmış yetkili rolü (key verebilen ekip) bu sunucudaysa log ve paneli de görür
+  const yetkili = ayniSunucu && YETKILI_ROL_ID ? await guild.roles.fetch(YETKILI_ROL_ID).catch(() => null) : null
 
-  // Sadece satıcı ve yetkililerin gördüğü kanallar
-  const ozel = () => [
+  // Sadece satıcının (ve verilen rollerin) gördüğü kanallar
+  const ozel = (roller) => [
     { id: guild.roles.everyone.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
     { id: client.user.id, type: OverwriteType.Member, allow: BOT_OZEL_IZIN },
-    { id: i.user.id, type: OverwriteType.Member, allow: YETKILI_KANAL_IZIN },
-    { id: yetkili.rol.id, type: OverwriteType.Role, allow: YETKILI_KANAL_IZIN },
+    { id: satici, type: OverwriteType.Member, allow: SATICI_KANAL_IZIN },
+    ...roller.map(([id, izinler]) => ({ id, type: OverwriteType.Role, allow: izinler })),
   ]
+  const logRolleri = [[logRol.rol.id, LOG_ROL_IZIN], ...(yetkili ? [[yetkili.id, SATICI_KANAL_IZIN]] : [])]
+  const panelRolleri = yetkili ? [[yetkili.id, SATICI_KANAL_IZIN]] : []
   const hepsi = () => guild.channels.fetch().then((c) => [...c.values()])
   const kategori = await kanalBulYaDaAc(guild, await hepsi(), '', KUR_AD.kategori, {
     type: ChannelType.GuildCategory,
-    permissionOverwrites: ozel(),
+    permissionOverwrites: ozel(logRolleri),
   })
-  if (!kategori.yeni) await ozelKanalIzinleri(kategori.kanal, yetkili.rol.id)
-  const ozelKanal = async (id, ad, konu) => {
+  if (!kategori.yeni) await ozelKanalIzinleri(kategori.kanal, satici, logRolleri)
+  const ozelKanal = async (id, ad, konu, roller) => {
     const r = await kanalBulYaDaAc(guild, await hepsi(), ayniSunucu ? id : '', ad, {
       type: ChannelType.GuildText,
       parent: kategori.kanal.id,
       topic: konu,
-      permissionOverwrites: ozel(),
+      permissionOverwrites: ozel(roller),
     })
-    if (!r.yeni) await ozelKanalIzinleri(r.kanal, yetkili.rol.id)
+    if (!r.yeni) await ozelKanalIzinleri(r.kanal, satici, roller)
     return r
   }
-  const logK = await ozelKanal(LOG_CHANNEL_ID, KUR_AD.log, 'Yaren: satışlar, botların açılıp kapanması, hatalar')
-  const keyLogK = await ozelKanal(KEY_LOG_KANAL_ID, KUR_AD.keyLog, 'Yaren: kim hangi keyi ne zaman üretti, verdi, kullandı')
-  const yonetimK = await ozelKanal(ayniSunucu ? paneller.yonetimKanalId : '', KUR_AD.yonetim, 'Yaren yönetim paneli: key ver, süre uzat/bitir')
+  const logK = await ozelKanal(LOG_CHANNEL_ID, KUR_AD.log, 'Yaren: satışlar, botların açılıp kapanması, hatalar', logRolleri)
+  const keyLogK = await ozelKanal(KEY_LOG_KANAL_ID, KUR_AD.keyLog, 'Yaren: kim hangi keyi ne zaman üretti, verdi, kullandı', logRolleri)
+  const yonetimK = await ozelKanal(paneller.yonetimKanalId, KUR_AD.yonetim, 'Yaren yönetim paneli: key ver, süre uzat/bitir', panelRolleri)
+
+  // Bot başka sunucudan taşınıyorsa eski sunucunun odaları ve key kanalları artık
+  // açılamaz (Missing Access): müşteriler yeni sunucuda yeni oda alsın (ayarları kalır)
+  if (!ayniSunucu) {
+    const buradakiler = new Set((await hepsi()).map((c) => c.id))
+    for (const l of depo.ozetListe().lisanslar) {
+      if (l.kanalId && !buradakiler.has(l.kanalId)) {
+        kuyruklar.delete(l.kanalId)
+        depo.kanalAyarla(l.userId, null)
+      }
+    }
+    paneller.keyKanallari = paneller.keyKanallari.filter((id) => buradakiler.has(id))
+    if (!buradakiler.has(paneller.yonetimKanalId)) paneller.yonetimMesajId = null
+  }
 
   // Müşterilerin key yazdığı kanal (herkese açık; konu açılmasın diye thread kapalı)
   let keyK = null
-  if (ayniSunucu) {
-    for (const id of [...paneller.keyKanallari].reverse()) {
-      const k = await kanalGetir(id).catch(() => null)
-      if (k && (!k.guildId || k.guildId === guild.id)) {
-        keyK = { kanal: k, yeni: false }
-        break
-      }
+  for (const id of [...paneller.keyKanallari].reverse()) {
+    const k = await kanalGetir(id).catch(() => null)
+    if (k && (!k.guildId || k.guildId === guild.id)) {
+      keyK = { kanal: k, yeni: false }
+      break
     }
   }
   if (!keyK) {
@@ -1184,14 +1257,16 @@ async function kurulumYap(i, guild) {
     })
   }
 
-  // Yeni ayarlar: önce bellekte (panel butonları hemen çalışsın), sonra dosyaya
+  // Yeni ayarlar: önce bellekte (panel butonları hemen çalışsın), sonra dosyaya.
+  // İlk kurulumda (ya da taşımada) kapı kapanır: kanalda bekleyen keyler önce
+  // sahiplerine işlenir, sonra butonla girenler sıraya girer.
   const ilkKurulum = kurulumModu || !ayniSunucu
+  if (ilkKurulum) kapiyiKapat()
   GUILD_ID = guild.id
-  ADMIN_ID = i.user.id
+  ADMIN_ID = satici
   LOG_CHANNEL_ID = logK.kanal.id
   KEY_LOG_KANAL_ID = keyLogK.kanal.id
-  YETKILI_ROL_ID = yetkili.rol.id
-  yetkiliRol = yetkili.rol
+  LOG_ROL_ID = logRol.rol.id
   MUSTERI_ROL_ID = musteri.rol.id
   musteriRol = musteri.rol
   try {
@@ -1200,19 +1275,34 @@ async function kurulumYap(i, guild) {
       discord_sahip_id: ADMIN_ID,
       log_kanal_id: LOG_CHANNEL_ID,
       key_log_kanal_id: KEY_LOG_KANAL_ID,
-      yetkili_rol_id: YETKILI_ROL_ID,
+      log_rol_id: LOG_ROL_ID,
       musteri_rol_id: MUSTERI_ROL_ID,
     })
   } catch (e) {
     notlar.push(`⚠️ Ayarlar dosyaya yazılamadı (${e.message}). Bot şimdilik çalışır; yeniden açılınca tekrar /kur yaz.`)
   }
+  // Ortam değişkeni varsa bir sonraki açılışta dosyadaki değerin yerine o kullanılır
+  const envdekiler = [
+    ['GUILD_ID', 'guild_id'],
+    ['DISCORD_OWNER_ID', 'discord_sahip_id'],
+    ['LOG_CHANNEL_ID', 'log_kanal_id'],
+    ['KEY_LOG_CHANNEL_ID', 'key_log_kanal_id'],
+    ['LOG_ROL_ID', 'log_rol_id'],
+    ['MUSTERI_ROL_ID', 'musteri_rol_id'],
+  ].filter(([env]) => ayarlar.envden(env))
+  if (envdekiler.length) {
+    notlar.push(`⚠️ Şu ayarlar ortam değişkeninden geliyor, bot yeniden açılınca kaydedilen değerin yerine onlar kullanılır: ${envdekiler.map(([e]) => e).join(', ')}. Onları sil ya da güncelle.`)
+  }
+  if (eskiSatici && eskiSatici !== satici) {
+    saticiDegisti(eskiSatici, satici, [kategori.kanal, logK.kanal, keyLogK.kanal, yonetimK.kanal]).catch((e) => console.error('Satıcı değişimi:', e.message))
+  }
 
-  // Yetkili rolü /kur yazana
+  // Log rolü /kur yazana
   try {
-    const uye = await guild.members.fetch({ user: i.user.id, force: true })
-    if (!uye.roles.cache.has(yetkili.rol.id)) await uye.roles.add(yetkili.rol, 'Yaren /kur')
+    const uye = await guild.members.fetch({ user: satici, force: true })
+    if (!uye.roles.cache.has(logRol.rol.id)) await uye.roles.add(logRol.rol, 'Yaren /kur')
   } catch (e) {
-    notlar.push(`⚠️ "${yetkili.rol.name}" rolü sana verilemedi (${e.message}).`)
+    notlar.push(`⚠️ "${logRol.rol.name}" rolü sana verilemedi (${e.message}).`)
   }
 
   // Paneller
@@ -1239,7 +1329,6 @@ async function kurulumYap(i, guild) {
     }
     await sunucuyuBaslat()
   } else {
-    yetkiliOdalaraEkle().catch(() => {})
     rolleriEsitle().catch((e) => console.error('Müşteri rolleri eşitlenemedi:', e.message))
   }
   adminLog(`✅ Yaren kuruldu (/kur: ${i.user.tag}).`)
@@ -1251,9 +1340,9 @@ async function kurulumYap(i, guild) {
     '',
     `📋 Log: <#${logK.kanal.id}>${isaret(logK)}`,
     `🔑 Key logu: <#${keyLogK.kanal.id}>${isaret(keyLogK)}`,
-    `🛠️ Yönetim paneli: <#${yonetimK.kanal.id}>${isaret(yonetimK)} (key ver, süre uzat/bitir)`,
+    `🛠️ Yönetim paneli: <#${yonetimK.kanal.id}>${isaret(yonetimK)} (key ver, süre uzat/bitir; sadece sen görürsün)`,
     `🎫 Key kanalı: <#${keyK.kanal.id}>${isaret(keyK)} (müşteriler keyini buraya yazar)`,
-    `👮 <@&${yetkili.rol.id}>${isaret(yetkili)} rolü sana verildi. Bu rolü verdiğin kişi log kanallarını ve yönetim panelini görür, key verebilir.`,
+    `📜 <@&${logRol.rol.id}>${isaret(logRol)} rolü sana verildi. Bu rolü verdiğin kişi log kanallarını görür; key veremez, paneli görmez.`,
     `🧑 <@&${musteri.rol.id}>${isaret(musteri)} rolü key girenlere otomatik verilir, süresi bitince alınır.`,
   ]
   if (!mesajOkunur) {
@@ -2022,7 +2111,7 @@ function panelKaydet() {
 
 // Kanal herkese açık mı: @everyone ya da yönetici/yetkili olmayan herhangi bir rol
 // (ör. kayıtlı sunuculardaki "Üye" rolü) görebiliyorsa açık sayılır
-function herkeseAcik(kanal, guild) {
+function herkeseAcik(kanal, guild, haric = []) {
   if (!kanal?.permissionsFor) return true
   const gorur = (r) => kanal.permissionsFor(r)?.has(PermissionFlagsBits.ViewChannel) !== false
   if (gorur(guild.roles.everyone)) return true
@@ -2031,6 +2120,7 @@ function herkeseAcik(kanal, guild) {
     (r) =>
       r.id !== guild.roles.everyone.id &&
       r.id !== yetkiliRol?.id &&
+      !haric.includes(r.id) &&
       !r.managed && // botların kendi rolleri
       !r.permissions?.has(PermissionFlagsBits.Administrator) &&
       gorur(r)
@@ -2282,7 +2372,7 @@ async function yonetimKur(i) {
         permissionOverwrites: [
           { id: guild.roles.everyone.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
           { id: client.user.id, type: OverwriteType.Member, allow: [...izin, PermissionFlagsBits.EmbedLinks] },
-          { id: ADMIN_ID, type: OverwriteType.Member, allow: [...izin, PermissionFlagsBits.UseApplicationCommands] },
+          ...(ADMIN_ID ? [{ id: ADMIN_ID, type: OverwriteType.Member, allow: [...izin, PermissionFlagsBits.UseApplicationCommands] }] : []),
           ...(yetkiliRol ? [{ id: yetkiliRol.id, type: OverwriteType.Role, allow: [...izin, PermissionFlagsBits.UseApplicationCommands] }] : []),
         ],
       })
@@ -2576,10 +2666,23 @@ const tokenTemizle = (t) =>
     .replace(/^(Bot|Bearer)\s+/i, '')
     .trim()
 
-function soru(metin) {
+// Gizli soru: yazılan/yapıştırılan ekrana hiç basılmaz (token ekran görüntüsünde görünmesin).
+// Ctrl+C ya da pencere girişi kapanırsa bot kapanır (takılı kalmaz).
+function gizliSor(metin) {
   return new Promise((coz) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-    rl.question(metin, (cevap) => {
+    process.stdout.write(metin)
+    const sessiz = new Writable({ write: (_parca, _kod, cb) => cb() })
+    const rl = readline.createInterface({ input: process.stdin, output: sessiz, terminal: !!process.stdin.isTTY })
+    let cevaplandi = false
+    const cik = () => {
+      if (cevaplandi) return
+      process.stdout.write('\n')
+      process.exit(0)
+    }
+    rl.on('SIGINT', cik)
+    rl.on('close', cik)
+    rl.question('', (cevap) => {
+      cevaplandi = true
       rl.close()
       coz(cevap)
     })
@@ -2609,16 +2712,12 @@ async function tokenSor(neden) {
   console.log('2) "New Application" > ad ver (ör. Yaren) > Create.')
   console.log('3) Soldan "Bot" > "Reset Token" > "Yes, do it!" > "Copy".')
   console.log('4) Buraya yapıştır (sağ tık ya da Ctrl+V) ve Enter\'a bas.')
+  console.log('   Yapıştırınca ekranda görünmez, bu normal: Enter\'a bas.')
   console.log('   Token botun şifresidir: kimseye gösterme.')
   console.log('========================================================')
   for (;;) {
-    const token = tokenTemizle(await soru('Token: '))
-    // yapıştırılan token ekranda kalmasın (ekran görüntüsü atılırsa görünmesin)
-    if (process.stdout.isTTY) {
-      readline.moveCursor(process.stdout, 0, -1)
-      readline.clearLine(process.stdout, 0)
-      console.log('Token: ' + (token ? token.slice(0, 6) + '… (gizlendi)' : ''))
-    }
+    const token = tokenTemizle(await gizliSor('Token: '))
+    console.log(token ? token.slice(0, 6) + '… (gizlendi)' : '(boş)')
     if (!token) continue
     if (!/^[\w-]+\.[\w-]+\.[\w-]+$/.test(token)) {
       console.log('Bu bir bot token\'ına benzemiyor (noktayla ayrılmış 3 parça olmalı). Bot sayfasındaki "Reset Token" ile alınanı yapıştır.')
@@ -2666,13 +2765,26 @@ async function mesajIzniAc(uygulama) {
   return false
 }
 
+// 5: kullanıcının düzeltmesi gereken bir şey var; baslat.bat yeniden denemeden bekler
+const DUZELT = 5
+
 async function girisYap() {
+  if (ayarlar.bozuk) {
+    console.error(`ayarlar.json bozuk, okunamadı: ${ayarlar.bozuk}`)
+    console.error('Not Defteri ile aç, fazla/eksik virgül ya da tırnağı düzelt ve kaydet. Düzeltemezsen dosyayı sil:')
+    console.error("bot token'ı yeniden sorar, sunucunda /kur'u tekrar yazarsın (müşteriler veri/ klasöründe, kaybolmaz).")
+    process.exit(DUZELT)
+  }
   let uygulama = null
   if (!DISCORD_TOKEN) {
     ;({ token: DISCORD_TOKEN, uygulama } = await tokenSor('Discord bot token\'ı henüz girilmemiş.'))
   } else {
     DISCORD_TOKEN = tokenTemizle(DISCORD_TOKEN)
     const r = await tokenDene(DISCORD_TOKEN)
+    if (r.yanlis && ayarlar.envden('DISCORD_TOKEN')) {
+      console.error("DISCORD_TOKEN ortam değişkenindeki token geçersiz: onu güncelle ya da sil (o varken ayarlar.json'daki token kullanılmaz).")
+      process.exit(DUZELT)
+    }
     if (r.yanlis) ({ token: DISCORD_TOKEN, uygulama } = await tokenSor('Kayıtlı token artık geçersiz (sıfırlanmış olabilir).'))
     else if (r.hata) console.error('Bot bilgisi alınamadı:', r.hata)
     else uygulama = r.uygulama
