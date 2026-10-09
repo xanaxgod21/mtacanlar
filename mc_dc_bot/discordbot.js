@@ -57,7 +57,7 @@ const {
 } = require('discord.js')
 const ayarlar = require('./ayarlar')
 const { LisansDeposu, bitisYazi, sureYazi, keySuresi, GUN, SAAT } = require('./lisans')
-const { BotYonetici, hedefKontrol } = require('./botyonetici')
+const { BotYonetici, hedefKontrol, sunucuyaUlasilir, baglantiHatasiMetni } = require('./botyonetici')
 
 // ---------- AYARLAR ----------
 // Hepsi ayarlar.json'dan (ya da aynı isimli ortam değişkenlerinden) okunur.
@@ -1469,6 +1469,10 @@ async function odaKomutu(i, l) {
     // Botlar senin makinende çalışır: müşteri senin yerel ağına bağlatamasın
     const engel = yerelIzin ? null : await hedefKontrol(host, port)
     if (engel) return i.editReply(engel)
+    // Sunucu cevap vermiyorsa botu boşuna başlatıp 3 kez denemesin: hemen nedenini söyle
+    await i.editReply(`Sunucu yoklanıyor: **${host}:${port}**...`).catch(() => {})
+    const ulasim = await sunucuyaUlasilir(host, port)
+    if (!ulasim.ok) return i.editReply(baglantiHatasiMetni(ulasim.kod, `${ulasim.host}:${ulasim.port}`))
     if (yonetici.calisiyor(uid)) return i.editReply('Botun zaten çalışıyor. Önce /durdur yaz.')
     // adres kontrolü birkaç saniye sürebilir; bu arada lisans dolmuş/iptal edilmiş olabilir
     if (!depo.aktifMi(depo.bul(uid))) return i.editReply('Lisans süren doldu, bot başlatılmadı. Yeni key: /key-gir')

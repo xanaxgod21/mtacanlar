@@ -139,6 +139,17 @@ SORUN ÇIKARSA (siyah pencerede ya da Discord'da yazan)
         Kanala yazarak da girsinler istersen: Developer Portal > Bot >
         "Message Content Intent" aç > "Save Changes", botu yeniden başlat.
         (Bot bunu çoğu zaman kendisi açar.)
+ "Sunucu cevap vermedi (...)" ya da "connect ETIMEDOUT"
+     -> Bot sunucuya hiç ulaşamadı. Şunlara bak:
+        - Adres ve port doğru mu? Sunucu 25565 dışında bir port kullanıyorsa
+          /baslat host:ADRES port:PORT diye yaz.
+        - Sunucu Java sürümü mü? Bot Bedrock (telefon / Windows 10 / konsol)
+          sunucularına giremez.
+        - Kendi Minecraft'ınla (Java) aynı adrese girebiliyor musun? Giremiyorsan
+          sunucu kapalıdır ya da adres yanlıştır.
+        Bot artık /baslat'ta sunucuyu önce yoklar; cevap yoksa başlatmadan söyler.
+ "Sunucu bağlantıyı reddetti (...)"
+     -> O portta Minecraft sunucusu yok: port yanlış ya da sunucu kapalı.
  Bot sunucudan atıldıysa
      -> Adım 4'teki linkle geri ekle; ayarlar durduğu için kaldığı yerden
         devam eder. Bot yokken key kanalına yazılan keyler geri gelince

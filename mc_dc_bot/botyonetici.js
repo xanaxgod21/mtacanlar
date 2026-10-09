@@ -8,7 +8,7 @@ const { fork } = require('child_process')
 const { EventEmitter } = require('events')
 const fs = require('fs')
 const path = require('path')
-const { hedefKontrol, ozelAdres } = require('./ag')
+const { hedefKontrol, ozelAdres, sunucuyaUlasilir, baglantiHatasiMetni } = require('./ag')
 
 const BOT_BELLEK_MB = 384 // bir müşteri botu en fazla bu kadar bellek kullanır
 const MAX_SATIR = 500 // tek log satırı (sunucunun dev atılma mesajı odayı boğmasın)
@@ -205,4 +205,4 @@ class BotYonetici extends EventEmitter {
   }
 }
 
-module.exports = { BotYonetici, hedefKontrol, ozelAdres }
+module.exports = { BotYonetici, hedefKontrol, ozelAdres, sunucuyaUlasilir, baglantiHatasiMetni }

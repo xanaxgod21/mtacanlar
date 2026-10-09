@@ -26,7 +26,7 @@ const { Vec3 } = require('vec3')
 const fs = require('fs')
 const path = require('path')
 const ayarlar = require('./ayarlar')
-const { guvenliBaglanti } = require('./ag')
+const { guvenliBaglanti, baglantiHatasiMetni } = require('./ag')
 
 let createBrain
 try {
@@ -80,6 +80,7 @@ const YARDIM = 'Komutlar: !farm !odun !tas !topla !bosalt !sandik !gel !dur !dur
 const botSecenek = {
   host: HOST,
   port: PORT,
+  logErrors: false, // mineflayer hatayı ham yığınıyla basmasın; aşağıda anlaşılır yazılır
   username: BOT_NAME,
   auth: AUTH,
   ...(VERSION ? { version: VERSION } : {}),
@@ -1866,8 +1867,12 @@ bot.on('kicked', (r) => {
     console.log('[giris] Sunucu şifrenin yanlış olduğunu söyledi ve attı! Discord odanda /giris sifre:DOĞRU_ŞİFRE yaz, sonra /baslat.')
   }
 })
+let sonHata = ''
 bot.on('error', (e) => {
-  console.log('[olay] Hata:', e.message || e)
+  // bağlantı hataları (sunucu kapalı, port yanlış...) anlaşılır ve bir kez yazılır
+  const metin = e && e.code && e.syscall === 'connect' ? baglantiHatasiMetni(e.code, `${e.address || HOST}:${e.port || PORT}`) : e.message || String(e)
+  if (metin !== sonHata) console.log('[olay] Hata:', metin)
+  sonHata = metin
   // Daha bağlanmadan (ör. Microsoft girişi başarısız) hata olursa 'end' gelmez
   if (!hazir && !bot._client?.socket) process.exit(1)
 })

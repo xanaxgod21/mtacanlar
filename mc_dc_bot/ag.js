@@ -90,4 +90,52 @@ function guvenliBaglanti(secenek, reddet, dnsFn) {
   }
 }
 
-module.exports = { ozelAdres, hedefCoz, hedefKontrol, guvenliBaglanti }
+// Sunucu gerçekten cevap veriyor mu: verilen IP:port'a TCP bağlantısı açılabiliyor mu.
+// { ok: true } ya da { kod: 'ETIMEDOUT' | 'ECONNREFUSED' | ... }
+function tcpDene(ip, port, ms = 8000) {
+  return new Promise((coz) => {
+    const soket = net.connect({ host: ip, port })
+    let bitti = false
+    const bitir = (sonuc) => {
+      if (bitti) return
+      bitti = true
+      soket.destroy()
+      coz(sonuc)
+    }
+    soket.setTimeout(ms, () => bitir({ kod: 'ETIMEDOUT' }))
+    soket.once('connect', () => bitir({ ok: true }))
+    soket.once('error', (e) => bitir({ kod: e.code || 'HATA' }))
+  })
+}
+
+// /baslat'ta botu başlatmadan önce: adresi (SRV dahil) çöz, sunucuya bağlanılabiliyor mu bak
+async function sunucuyaUlasilir(host, port, dnsFn, ms) {
+  const r = await hedefCoz(host, port, dnsFn)
+  if (!r.adresler.length) return { kod: r.hata || 'ENOTFOUND', host: r.host, port: r.port }
+  return { ...(await tcpDene(r.adresler[0], r.port, ms)), host: r.host, port: r.port }
+}
+
+// Bağlantı hatalarının müşteriye anlaşılır açıklaması (ham hata yığını yerine)
+function baglantiHatasiMetni(kod, adres) {
+  switch (kod) {
+    case 'ETIMEDOUT':
+      return (
+        `Sunucu cevap vermedi (${adres}). Olası nedenler: sunucu kapalı, adres ya da port yanlış, ` +
+        'ya da bu bir Bedrock (telefon / Windows 10 / konsol) sunucusu. Bot sadece Java sürümü sunuculara girer. ' +
+        'Sunucunun Java adresini ve portunu kontrol et: /baslat host:ADRES port:PORT'
+      )
+    case 'ECONNREFUSED':
+      return `Sunucu bağlantıyı reddetti (${adres}): bu portta açık bir Minecraft sunucusu yok. Port yanlış ya da sunucu kapalı. Doğru portu yaz: /baslat host:ADRES port:PORT`
+    case 'ECONNRESET':
+      return `Sunucu bağlantıyı hemen kesti (${adres}). Sunucu yeniden başlıyor ya da bot koruması olabilir; biraz sonra tekrar dene.`
+    case 'EHOSTUNREACH':
+    case 'ENETUNREACH':
+      return `Sunucuya ulaşılamıyor (${adres}): botun çalıştığı bilgisayarın internet bağlantısını ve adresi kontrol et.`
+    case 'ENOTFOUND':
+      return `Bu sunucu adresi bulunamadı (${adres}), doğru yazdığından emin ol.`
+    default:
+      return `Sunucuya bağlanılamadı (${adres}, ${kod}).`
+  }
+}
+
+module.exports = { ozelAdres, hedefCoz, hedefKontrol, guvenliBaglanti, tcpDene, sunucuyaUlasilir, baglantiHatasiMetni }
