@@ -1,6 +1,6 @@
 # MC DC BOT (Yaren) — satış sürümü
 
-Minecraft'ta odun kesen, taş kıran, tarla toplayan bir NPC (Yaren). Sen
+Minecraft'ta odun kesen, maden kazan, taş kıran, tarla toplayan bir NPC (Yaren). Sen
 **yönetim panelinden** süresini seçip key verirsin; müşteri keyini **key
 kanalına** yazar, bot kontrol eder: doğruysa ona özel bir oda açar, yanlışsa
 hata verir. Müşteri botunu o odadan yönetir. Süreler panelde canlı görünür,
@@ -9,6 +9,23 @@ ayrı çalışır.
 
 ## Yenilikler (son sürüm)
 
+- **Odaya yazman yeter:** müşteri odasına düz yazı yazar, bot yapar: "odun kes",
+  "maden kaz", "taş kır", "gel", "dur", "durum". Cevabı mesaja yanıt olarak gelir.
+  Yapay zeka kapalıyken de anlar. Odaya `/warp xanaxgod` yazarsa bot oyunda o komutu
+  yazar, `!maden` gibi oyun komutları da olur. Sadece odanın sahibinin yazdıkları
+  işlenir; başkasını etiketlediği mesajlara (sana yazdıklarına) karışmaz.
+- **`/komut`:** `/komut komut:warp xanaxgod` yazınca bot oyunda `/warp xanaxgod`
+  yazar. Şifre içerebilecek komutlar (`/login`, `/register`...) odada gösterilmez.
+- **Maden görevi (`!maden`):** kömür, demir, bakır, altın, kızıltaş, lapis, elmas,
+  zümrüt kazar (derin kaya ve Nether cevherleri dahil). Kazmasının yetmediğini
+  (taş kazmayla elmas gibi) ve lavın dibindekini kazmaz. Görünen cevher yoksa düz
+  tünel açarak arar, aşağı kuyu kazmaz.
+- **En yakın sandığa götürür:** sandık göstermesen de bot topladıklarını (bir yığın
+  olunca, envanter dolunca ve iş bitince) görevin başladığı yere en yakın sandığa
+  götürür. Oraya sadece o işte topladıklarını bırakır, yanındaki diğer eşyalara ve
+  aletlerine dokunmaz. Sandık gösterdiysen (`!sandik ekle`) oraya götürür.
+- **Ağacı daha iyi görür:** bot bazı yönlerdeki ağaçları "görmüyor" sanıp boşuna
+  geziyordu; düzeltildi.
 - **Yapay zekayı Discord'dan aç:** `/yapay-zeka` yaz, "Anahtarı Gir"e bas, Anthropic API
   anahtarını yapıştır. Bot dener (anahtar, kredi, model), doğruysa kaydeder ve çalışan
   botlarda hemen açar. **Anahtarsız da çalışır:** "Yaren odun kes", "Yaren gel", "Yaren
@@ -196,28 +213,38 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
 2. Odasında `/baslat host:oyna.sunucu.com` yazar, bot sunucuya girer (sonraki
    seferlerde sadece `/baslat`).
 3. Bot girince odasında `/sahip ad:OyundakiAdı` yazar (örn. `/sahip ad:xdarkoum`).
-   Bot artık oyunda **sadece o oyuncunun** yazdıklarını yapar: `!odun` `!tas`
-   `!farm` `!gel` `!dur` `!durum`, ya da "Yaren biraz odun lazım" gibi konuşur.
+   Bot artık oyunda **sadece o oyuncunun** yazdıklarını yapar: `!odun` `!maden`
+   `!tas` `!farm` `!gel` `!dur` `!durum`, ya da "Yaren biraz odun lazım" gibi konuşur.
    Büyük/küçük harf fark etmez, istediği zaman `/sahip` ile değiştirir; boş
    `/sahip` şu anki sahibi gösterir. Sahip yazılmadıysa bot kimseyi dinlemez.
 4. Sunucu girişte şifre istiyorsa (`/login`, `/register`) odasında
    `/giris sifre:BotunŞifresi` yazar; bot her girişte kendisi yazar (ilk seferde
    kayıt olur). Boş `/giris` kayıtlı şifre var mı gösterir, `/giris sifre:sil` siler.
    Şifre her sunucu için ayrı saklanır ve hiçbir yerde gösterilmez.
-5. Oyun sohbeti odasına düşer: `/sohbet durum:kapalı` ile kapatır. `/yaz mesaj:selam`
-   ile bot oyunda yazar (`/yaz mesaj:/warp maden` gibi komut da olur).
-6. `/gorev` `/durum` `/soyle` `/sandik` `/durdur` odada; `/bilgi` ve `/odam` her yerde.
-7. Kalan süreyi odada, `/bilgi`'de ve oda başlığında görür (geri sayım). Bitişe
+5. **Odasına yazması yeter:** "odun kes", "maden kaz", "taş kır", "gel", "dur",
+   "durum" yazar, bot yapar ve cevabını mesajına yanıt olarak yazar. Odaya
+   `/warp xanaxgod` yazarsa bot oyunda bu komutu yazar; `/komut komut:warp xanaxgod`
+   de aynısı. `!maden`, `!sandik ekle` gibi oyun komutları da olur.
+6. Oyun sohbeti odasına düşer: `/sohbet durum:kapalı` ile kapatır. `/yaz mesaj:selam`
+   ile bot oyunda yazar.
+7. `/gorev` `/durum` `/soyle` `/komut` `/sandik` `/durdur` odada; `/bilgi` ve `/odam` her yerde.
+8. Kalan süreyi odada, `/bilgi`'de ve oda başlığında görür (geri sayım). Bitişe
    1 gün ve 1 saat kala uyarılır.
-8. Süre bitince botu durur, **odası silinir** ve DM ile haber verilir. Yeni key
+9. Süre bitince botu durur, **odası silinir** ve DM ile haber verilir. Yeni key
    girerse odası yeniden açılır; botunun ayarları, sandıkları, deneyimleri kaybolmaz.
    Süresi bitmeden yeni key girerse süre kalan sürenin üstüne eklenir.
 
-## Oyun içi: odun, balta ve sandıklar
+## Oyun içi: odun, maden, aletler ve sandıklar
 
 - **Odun:** kütükleri baltayla keser, ağacın yapraklarını **elle** kırar (balta
   yaprakta boşuna aşınmaz), düşen fidanları toplar ve diker. Sadece kestiği
   ağacın doğal yapraklarına dokunur; uzanamadığı yapraklar kendiliğinden dökülür.
+- **Maden:** cevher kazar (kömür, demir, bakır, altın, kızıltaş, lapis, elmas,
+  zümrüt; derin kaya ve Nether cevherleri dahil). Önce mağara duvarında açıkta
+  olanları, sonra yakındakileri kazar. Kazmasının yetmediğini (elmas, altın için
+  en az demir kazma) ve lavın dibindekini kazmaz. Görünen cevher kalmayınca ayak
+  ve baş hizasında düz tünel açarak arar (aşağı kuyu kazmaz); 64 adımda bulamazsa
+  durur. En iyi sonucu madende / mağarada verir (`/warp maden` gibi).
 - **Alet bakımı:** baltanın (kazmanın) 10'dan az dayanıklılığı kalınca
   envanterdeki sağlam olanına geçer; yoksa gösterilen sandıklardan alır. Hiç
   yoksa sohbetten haber verir ve eskisiyle devam eder. Büyülü aleti kırılmasın
@@ -225,8 +252,15 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
 - **Sandıklar:** oyunda sandığın dibinde dur ve `!sandik ekle` yaz (ya da
   `!sandik ekle x y z`, Discord'da `/sandik`). En fazla 10 sandık; sunucu başına
   ayrı kaydedilir. `!sandik liste`, `!sandik sil`, `!sandik temizle`.
-- **Boşaltma:** envanter yarı dolunca (36 yuvanın 18'i) topladıklarını en yakın
-  sandıktan başlayarak bırakır ve işine geri döner. `!bosalt` ile hemen boşaltır.
+- **Sandık göstermediysen:** topladıklarını görevin başladığı yere en yakın (32 blok
+  içindeki) sandığa götürür. Oraya sadece o işte topladıklarını bırakır; yanında
+  getirdiği eşyalara ve aletlerine dokunmaz, oradan alet almaz (başkasının sandığı
+  olabilir). Açamadığı ya da dolu sandığı atlayıp sıradakini dener. Bu sandık
+  kaydedilmez: başka yerde iş verince oradaki en yakın sandık kullanılır.
+- **Boşaltma:** bir yığın (64) topladığında ya da envanter yarı dolunca (36 yuvanın
+  18'i) topladıklarını sandığa bırakır ve işine geri döner; iş kendiliğinden
+  bitince (süre doldu, yakında kalmadı) de götürür. `!dur` deyince götürmez.
+  `!bosalt` (ya da odaya "sandığa koy") ile hemen boşaltır.
   Yanında kalanlar: sağlam en iyi 2 aleti, 16 fidan, 32 tohum, 32 iskele bloğu
   (toprak/cobblestone), 16 yemek. Kırılmak üzere aletler (sağlamı varsa) tamir
   için sandığa gider. Zırh, yay gibi eşyalara dokunmaz.

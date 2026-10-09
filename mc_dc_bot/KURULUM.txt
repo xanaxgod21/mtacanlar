@@ -85,8 +85,8 @@ kanal varsa onu yeniden açar.
 
 YAPAY ZEKA (isteğe bağlı)
 ------------------------
-Yapay zeka olmadan da bot çalışır: oyunda "Yaren odun kes", "Yaren gel",
-"Yaren dur", "Yaren sandığa bırak" gibi cümleleri kendisi anlar.
+Yapay zeka olmadan da bot çalışır: odaya ya da oyunda "odun kes", "maden kaz",
+"gel", "dur", "sandığa bırak" gibi cümleleri kendisi anlar.
 Serbest sohbet ve otonom mod (bot kendi karar verir) için yapay zeka lazım.
 Bunun parası sana çıkar (Anthropic'e). Açmak için:
  a. https://console.anthropic.com adresinde hesap aç (Google ile girilir).
@@ -112,9 +112,12 @@ DENE
     ve sana özel oda açılır.
  c. Odada:  /baslat host:sunucu.adresi.com
     (Sunucu premium / orijinal hesap istiyorsa: hesap:microsoft seç.)
-    Bot oyuna girince:  /sahip ad:OyundakiAdın
-    Oyunda sohbete "!farm" ya da "!gel" yaz (başında ! olmalı), bot yapsın.
-    Bot sadece /sahip ile verdiğin isimle yazılanları dinler.
+    Bot oyuna girince odaya "odun kes" ya da "maden kaz" yaz: bot yapar,
+    topladığını en yakın sandığa götürür, cevabını odaya yazar.
+    Oyunda komut için:  /komut komut:warp xanaxgod  (bot oyunda /warp xanaxgod
+    yazar; odaya direkt "/warp xanaxgod" yazman da olur).
+    Oyunda da yönetmek istersen:  /sahip ad:OyundakiAdın  sonra oyunda "!odun",
+    "!maden", "!gel" yaz (başında ! olmalı). Bot oyunda sadece o ismi dinler.
 
 Siyah pencere açık kaldığı sürece bot çalışır; bilgisayar kapanınca bot da
 kapanır. 7/24 için VPS gerekir (bkz. OKUBENI.md).

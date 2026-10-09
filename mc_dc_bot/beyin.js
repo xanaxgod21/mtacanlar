@@ -23,11 +23,11 @@ const TOOLS = [
   {
     name: 'gorev_baslat',
     description:
-      'Bir görev başlatır. farm: olgun ekinleri toplar ve yeniden eker. odun: ağacı baltayla keser, yapraklarını elle kırar, fidan diker (ev gibi yapılara dokunmaz). tas: doğal taş kırar, cobblestone yapılara dokunmaz (kazma gerekir). bosalt: topladıklarını sahibin gösterdiği sandıklara bırakır. Görevler sırasında envanter yarı dolunca sandığa kendiliğinden boşaltılır, alet kırılmak üzereyse sandıktan yenisi alınır. Çalışan görev varsa onu bırakıp yenisine geçer.',
+      'Bir görev başlatır. farm: olgun ekinleri toplar ve yeniden eker. odun: ağacı baltayla keser, yapraklarını elle kırar, fidan diker (ev gibi yapılara dokunmaz). tas: doğal taş kırar, cobblestone yapılara dokunmaz (kazma gerekir). maden: cevher kazar (kömür, demir, bakır, altın, elmas...), görünen cevher yoksa tünel açarak arar (kazma gerekir). bosalt: topladıklarını sandığa bırakır. Görevler topladığını kendiliğinden sandığa götürür (bir yığın toplayınca, envanter dolunca ve görev bitince): sahip sandık gösterdiyse oraya, göstermediyse görevin başladığı yere en yakın sandığa. Alet kırılmak üzereyse gösterilen sandıktan yenisi alınır. Çalışan görev varsa onu bırakıp yenisine geçer.',
     input_schema: {
       type: 'object',
       properties: {
-        gorev: { type: 'string', enum: ['farm', 'odun', 'tas', 'bosalt'] },
+        gorev: { type: 'string', enum: ['farm', 'odun', 'tas', 'maden', 'bosalt'] },
         dakika: {
           type: 'integer',
           description: 'Kaç dakika çalışsın. Boşsa durdurulana kadar. Otonom modda en fazla 8.',
@@ -69,7 +69,7 @@ const TOOLS = [
     input_schema: {
       type: 'object',
       properties: {
-        gorev: { type: 'string', description: 'farm, odun, tas veya genel' },
+        gorev: { type: 'string', description: 'farm, odun, tas, maden veya genel' },
         ders: { type: 'string', description: 'Tek cümlelik ders' },
       },
       required: ['ders'],
@@ -196,7 +196,7 @@ Nasıl çalışırsın:
 - Bir oyuncu gibi düşün. Karar vermeden önce durum_bak ile envanterine, canına, açlığına ve gece/gündüze bak.
 - Görevleri araçlarla başlatırsın. Yürüme, kırma ve ekme işini oyun kodu yapar; sen neyin ne zaman yapılacağına karar verirsin.
 - Koşul uygun değilse (kazma yok, gece ve can düşük, envanter dolu) görevi başlatma. Nedenini sahibine söyle ve ne gerektiğini iste.
-- Sahibin sandık gösterdiyse (durum_bak: sandik_sayisi) envanter yarı dolunca oraya kendin boşaltırsın. Sandık yoksa ve envanter dolarsa sahibinden "!sandik ekle" ile sandık göstermesini iste ve otonom modu kapat.
+- Görevler topladığını kendiliğinden sandığa götürür: sahibin sandık gösterdiyse (durum_bak: sandik_sayisi) oraya, göstermediyse görevin başladığı yere en yakın sandığa. "Odun kes, sandığa götür" gibi isteklerde sadece görevi başlatman yeter. Yakında hiç sandık yoksa ve envanter dolarsa sahibinden "!sandik ekle" ile sandık göstermesini iste ve otonom modu kapat.
 - Yapamayacağın bir şeyi yapabiliyormuş gibi davranma, dürüstçe söyle.
 - Bir görev başarısız olursa nedenini düşün. Gelecekte işe yarayacak genel bir ders çıkarırsan ders_kaydet ile yaz.
 

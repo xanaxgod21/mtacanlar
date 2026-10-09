@@ -458,13 +458,15 @@ function hosgeldin(l) {
     '3. Sunucu girişte şifre istiyorsa (`/login`, `/register`): `/giris sifre:BotunŞifresi` yaz, bot her girişte kendisi yazar.',
     'Bir kere yazman yeter, sonraki seferlerde sadece `/baslat` yazabilirsin.',
     '',
+    '**Bu odaya yazman yeter:** "odun kes", "maden kaz", "taş kır", "tarla", "gel", "dur", "durum". Bot yapar, cevabını buraya yazar.',
+    '**Oyunda komut:** `/komut komut:warp xanaxgod` ya da odaya `/warp xanaxgod` yaz, bot oyunda `/warp xanaxgod` yazar.',
     'Oyun sohbeti bu odaya düşer (`/sohbet` ile kapatırsın), `/yaz` ile odadan oyuna yazarsın.',
     'Bot acıkınca yanındaki yemeği kendisi yer, boştayken AFK diye atılmasın diye arada hareket eder.',
     '',
-    'Diğer komutlar: `/sahip` `/giris` `/sohbet` `/yaz` `/gorev` `/durum` `/sandik` `/soyle` `/durdur` `/bilgi`',
-    'Oyun içinde: `!odun` `!tas` `!farm` `!topla` `!bosalt` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş' +
+    'Diğer komutlar: `/sahip` `/giris` `/sohbet` `/yaz` `/komut` `/gorev` `/durum` `/sandik` `/soyle` `/durdur` `/bilgi`',
+    'Oyun içinde: `!odun` `!maden` `!tas` `!farm` `!topla` `!bosalt` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş' +
       (depo.aiAktifMi(l) && AI_ANAHTAR ? '.' : ' ("Yaren odun kes", "Yaren gel" gibi; yapay zeka kapalıyken basit cümleleri anlar).'),
-    '**Sandık:** oyunda sandığın dibinde dur ve `!sandik ekle` yaz. Bot envanteri yarı dolunca topladıklarını oraya bırakır, baltası kırılmak üzereyse oradan yenisini alır.',
+    '**Sandık:** bot topladıklarını (bir yığın olunca ve iş bitince) görevin başladığı yere en yakın sandığa götürür. Kendi sandığını göstermek için oyunda dibinde dur ve `!sandik ekle` yaz: o zaman oraya bırakır, baltası/kazması kırılmak üzereyse oradan yenisini de alır.',
   ].join('\n')
 }
 
@@ -803,6 +805,7 @@ const GOREV_SECENEK = [
   { name: 'farm (çiftçilik)', value: 'farm' },
   { name: 'odun', value: 'odun' },
   { name: 'taş', value: 'tas' },
+  { name: 'maden (cevher kaz)', value: 'maden' },
   { name: 'topla (yerdeki eşyalar)', value: 'topla' },
   { name: 'otonom (kendi karar versin)', value: 'otonom' },
   { name: 'dur (görevi iptal et)', value: 'dur' },
@@ -902,6 +905,13 @@ const COMMANDS = [
     options: [{ name: 'mesaj', description: 'Ne yazsın?', type: S.String, required: true, max_length: 256 }],
   },
   {
+    name: 'komut',
+    description: 'Bot oyunda sunucu komutu yazar: "warp xanaxgod" yazarsan oyunda /warp xanaxgod',
+    options: [
+      { name: 'komut', description: 'Başında / olmadan: warp xanaxgod, spawn, home ev...', type: S.String, required: true, max_length: 255 },
+    ],
+  },
+  {
     name: 'soyle',
     description: 'Yaren ile konuş (yapay zeka): "biraz odun lazım" gibi',
     options: [{ name: 'metin', description: 'Ne diyorsun?', type: S.String, required: true, max_length: 500 }],
@@ -969,7 +979,7 @@ const COMMANDS = [
   KUR_KOMUTU,
 ]
 const SATICI_KOMUTLARI = new Set(COMMANDS.filter((c) => c.default_member_permissions === '0').map((c) => c.name))
-const ODA_KOMUTLARI = new Set(['baslat', 'sahip', 'giris', 'sohbet', 'yaz', 'durdur', 'durum', 'gorev', 'sandik', 'soyle'])
+const ODA_KOMUTLARI = new Set(['baslat', 'sahip', 'giris', 'sohbet', 'yaz', 'komut', 'durdur', 'durum', 'gorev', 'sandik', 'soyle'])
 
 // ---------- AÇILIŞ ----------
 // Kurulum modu: ayarlarda sunucu yok ya da bot o sunucuda değil. Bot girdiği her
@@ -1652,7 +1662,7 @@ async function odaKomutu(i, l) {
     }
     if (!USER_RE.test(ad)) return i.reply('Minecraft adı 3-16 karakter olmalı (harf, rakam, _).')
     depo.guncelle(uid, { son: { ...(l.son || {}), owner: ad } })
-    const nasil = '\nOyunda: `!odun` `!tas` `!farm` `!topla` `!gel` `!dur` `!durum` `!yardim` ya da "Yaren ..." diye konuş.'
+    const nasil = '\nOyunda: `!odun` `!maden` `!tas` `!farm` `!topla` `!gel` `!dur` `!durum` `!yardim` ya da "Yaren ..." diye konuş. Bu odaya "odun kes" gibi yazman da yeter.'
     if (!yonetici.calisiyor(uid)) {
       return i.reply(`Tamam, sahip: **${ad}**. \`/baslat\` ile bot girince oyunda sadece senin yazdıklarını yapacak.${nasil}`)
     }
@@ -1718,6 +1728,14 @@ async function odaKomutu(i, l) {
     return i.reply({ content: `Oyunda yazıldı: ${mesaj}`, allowedMentions: { parse: [] } })
   }
 
+  if (i.commandName === 'komut') {
+    if (!yonetici.calisiyor(uid)) return i.reply(gizli('Botun çalışmıyor. Önce /baslat yaz.'))
+    const r = await oyundaCalistir(uid, i.options.getString('komut'))
+    if (r.hata) return i.reply(gizli(r.hata))
+    if (r.sifreli) return i.reply(gizli('Komut oyunda yazıldı (şifre içerebileceği için burada gösterilmiyor).'))
+    return i.reply({ content: `🎮 Oyunda yazıldı: ${kodYaz(r.komut)}${l.sohbetKapali ? SOHBET_KAPALI_NOTU : ''}`, allowedMentions: { parse: [] } })
+  }
+
   if (i.commandName === 'durdur') {
     denemeIptal(uid)
     depo.guncelle(uid, { calisiyordu: false })
@@ -1781,6 +1799,114 @@ async function odaKomutu(i, l) {
       allowedMentions: { parse: [] },
     })
   }
+}
+
+// ---------- OYUNDA KOMUT (/komut ve odaya "/" ile yazılanlar) ----------
+// Şifre olabilecek komutlar (/login, /register, /cp...) odada gösterilmez.
+const SIFRELI_KOMUT = /^\/(login|l|log|giris|register|reg|kayit|changepassword|changepass|cp|sifre|password|pass|2fa|totp|unregister)\b/
+const SOHBET_KAPALI_NOTU = '\n_(Oyun sohbeti bu odaya aktarılmıyor; sunucunun cevabını görmek için `/sohbet durum:açık`.)_'
+const kodYaz = (t) => '`' + String(t).replace(/`/g, "'") + '`'
+const sadeKomut = (t) =>
+  String(t)
+    .replace(/[İIı]/g, 'i')
+    .toLowerCase()
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+// { komut, sifreli } ya da { hata }
+async function oyundaCalistir(uid, metin) {
+  const k = String(metin || '').replace(/\s+/g, ' ').trim().replace(/^\/+\s*/, '')
+  if (!k) return { hata: 'Komutu yaz: örn. `/komut komut:warp xanaxgod` (oyunda /warp xanaxgod yazar).' }
+  const komut = '/' + k
+  if (komut.length > 256) return { hata: 'Komut çok uzun (en fazla 256 karakter).' }
+  const r = await yonetici.istek(uid, 'yaz', { metin: komut })
+  if (r.kod !== 200) return { hata: 'Oyunda yazılamadı: ' + (r.veri?.hata || r.kod) }
+  return { komut, sifreli: SIFRELI_KOMUT.test(sadeKomut(komut)) }
+}
+
+// ---------- ODAYA YAZILANLAR ----------
+// Müşteri odasına düz yazı yazarak da botunu yönetir (sadece odanın sahibi; satıcının
+// ya da başkasının yazdığına karışılmaz):
+//   "odun kes", "maden kaz", "gel", "dur"  -> Yaren anlar (yapay zeka ya da basit mod)
+//   "/warp xanaxgod"                        -> oyunda komut olarak yazılır (/komut gibi)
+//   "!maden", "!sandik ekle"                -> oyun içi komut
+// Mesajlar sırayla işlenir; cevap mesaja yanıt olarak yazılır.
+const odaSirasi = new Map() // userId -> { is: Promise, bekleyen }
+const icerikUyarildi = new Map() // userId -> zaman: yazılanı okuyamıyoruz uyarısı
+async function odaMesaji(m) {
+  if (kurulumModu || m.guildId !== GUILD_ID || m.author?.bot || m.system || m.webhookId) return
+  const l = depo.kanaldanBul(m.channelId)
+  if (!l || l.userId !== m.author.id || !depo.aktifMi(l)) return
+  const benim = new RegExp(`<@!?${client.user.id}>`, 'g')
+  // başkasını etiketlediyse (ör. satıcıya yazıyor) bota söylenmiş sayma
+  if (m.mentions?.everyone || m.mentions?.roles?.size || [...(m.mentions?.users?.keys() || [])].some((id) => id !== client.user.id)) return
+  const metin = String(m.content || '').replace(benim, ' ').trim()
+  if (!metin) {
+    // Message Content Intent kapalıysa yazılanı göremeyiz: arada bir söyle
+    if (!mesajOkunur && !m.attachments?.size && Date.now() - (icerikUyarildi.get(l.userId) || 0) > 10 * 60000) {
+      icerikUyarildi.set(l.userId, Date.now())
+      await m.channel
+        .send({
+          content:
+            `<@${l.userId}> yazdıklarını okuyamıyorum (satıcının Developer Portal'da "Message Content Intent"i açması lazım). ` +
+            'Şimdilik `/gorev`, `/soyle` ve `/komut` kullan.',
+          allowedMentions: { users: [l.userId] },
+        })
+        .catch(() => {})
+    }
+    return
+  }
+  let sira = odaSirasi.get(l.userId)
+  if (!sira) odaSirasi.set(l.userId, (sira = { is: Promise.resolve(), bekleyen: 0 }))
+  if (sira.bekleyen >= 3) return m.react('⏳').catch(() => {}) // art arda çok yazdı
+  sira.bekleyen++
+  sira.is = sira.is
+    .then(() => odaMesajiIsle(m, l.userId, metin))
+    .catch((e) => console.error('Oda mesajı:', e))
+    .finally(() => {
+      sira.bekleyen--
+      if (!sira.bekleyen && odaSirasi.get(l.userId) === sira) odaSirasi.delete(l.userId)
+    })
+}
+client.on(Events.MessageCreate, (m) => odaMesaji(m).catch((e) => console.error('Oda mesajı:', e)))
+
+async function odaMesajiIsle(m, uid, metin) {
+  const yaz = (content, yanit = true) => {
+    const govde = { content: content.length > 2000 ? content.slice(0, 1997) + '…' : content, allowedMentions: { parse: [] } }
+    const gonder = () => m.channel.send(govde).catch(() => {})
+    return yanit ? m.reply({ ...govde, allowedMentions: { parse: [], repliedUser: false } }).catch(gonder) : gonder()
+  }
+  const l = depo.bul(uid)
+  if (!l || !depo.aktifMi(l)) return
+  if (!yonetici.calisiyor(uid)) return yaz('Botun çalışmıyor. Önce `/baslat` yaz.')
+
+  // "/warp xanaxgod": oyunda komut
+  if (metin.startsWith('/')) {
+    const r = await oyundaCalistir(uid, metin)
+    if (r.hata) return yaz(r.hata)
+    if (r.sifreli) {
+      // şifre odada kalmasın
+      await m.delete().catch(() => {})
+      return yaz('Komut oyunda yazıldı. Şifre içerebileceği için mesajını sildim.', false)
+    }
+    return yaz(`🎮 Oyunda yazıldı: ${kodYaz(r.komut)}${l.sohbetKapali ? SOHBET_KAPALI_NOTU : ''}`)
+  }
+
+  // "!maden", "!sandik ekle": oyun içi komut
+  if (metin.startsWith('!')) {
+    const r = await yonetici.istek(uid, 'komut', { komut: metin.slice(1) })
+    if (r.kod === 400) return yaz('Bu komutu bilmiyorum. Şunlar var: `!odun` `!maden` `!tas` `!farm` `!topla` `!bosalt` `!sandik` `!gel` `!dur` `!durum` `!otonom`')
+    if (r.kod !== 200) return yaz('Bota ulaşamadım: ' + (r.veri?.hata || r.kod))
+    return yaz(`**Yaren:** ${r.veri.cevap}`)
+  }
+
+  // düz yazı: Yaren anlar (yapay zeka yoksa "odun kes", "maden kaz" gibi basit cümleler)
+  if (depo.aiAktifMi(l) && AI_ANAHTAR) m.channel.sendTyping?.().catch(() => {})
+  const r = await yonetici.istek(uid, 'soyle', { metin: metin.slice(0, 500) }, 90000)
+  if (r.kod !== 200) return yaz('Yaren cevap veremedi: ' + (r.veri?.hata || r.kod))
+  return yaz(`**Yaren:** ${r.veri.cevap}`)
 }
 
 async function odam(i) {
