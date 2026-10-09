@@ -71,6 +71,7 @@ let KEY_LOG_KANAL_ID = ayarlar.keyLogKanalId  // key geçmişi: kim üretti, kim
 let ADMIN_ID = ayarlar.discordSahipId         // satıcı (sen): key üretir, her odaya girer
 let YETKILI_ROL_ID = ayarlar.yetkiliRolId     // bu roldekiler de key verip lisans yönetebilir
 let MUSTERI_ROL_ID = ayarlar.musteriRolId     // key girene verilir, süre bitince alınır (boş = kapalı)
+let AI_ANAHTAR = ayarlar.apiKey               // yapay zeka (Anthropic) anahtarı; /yapay-zeka ile değişir
 const ODA_SILME_SAAT = ayarlar.odaSilmeSaat   // süre bitince oda kaç saat sonra silinsin (0 = hemen)
 const KATEGORI_ID = ayarlar.musteriKategoriId // müşteri odaları bu kategoriye (boşsa bot açar)
 const DEFAULT_BOT_NAME = 'GorevBot'
@@ -448,7 +449,7 @@ const odaAdi = (ad) =>
 function hosgeldin(l) {
   return [
     `Hoş geldin <@${l.userId}>! Bu oda sadece sana özel, botunu buradan yöneteceksin.`,
-    `Lisans bitişi: ${bitisDiscord(l)} | Yapay zeka: **${depo.aiAktifMi(l) && ayarlar.apiKey ? 'açık' : 'kapalı'}**`,
+    `Lisans bitişi: ${bitisDiscord(l)} | Yapay zeka: **${depo.aiAktifMi(l) && AI_ANAHTAR ? 'açık' : 'kapalı'}**`,
     l.bitis !== null ? 'Süren bitince bu oda silinir. Yeni key girersen yeniden açılır, ayarların kaybolmaz.' : '',
     '',
     '**Başlamak için:**',
@@ -461,7 +462,8 @@ function hosgeldin(l) {
     'Bot acıkınca yanındaki yemeği kendisi yer, boştayken AFK diye atılmasın diye arada hareket eder.',
     '',
     'Diğer komutlar: `/sahip` `/giris` `/sohbet` `/yaz` `/gorev` `/durum` `/sandik` `/soyle` `/durdur` `/bilgi`',
-    'Oyun içinde: `!odun` `!tas` `!farm` `!topla` `!bosalt` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş.',
+    'Oyun içinde: `!odun` `!tas` `!farm` `!topla` `!bosalt` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş' +
+      (depo.aiAktifMi(l) && AI_ANAHTAR ? '.' : ' ("Yaren odun kes", "Yaren gel" gibi; yapay zeka kapalıyken basit cümleleri anlar).'),
     '**Sandık:** oyunda sandığın dibinde dur ve `!sandik ekle` yaz. Bot envanteri yarı dolunca topladıklarını oraya bırakır, baltası kırılmak üzereyse oradan yenisini alır.',
   ].join('\n')
 }
@@ -629,6 +631,131 @@ function keyModal() {
         )
     )
 }
+
+// ---------- YAPAY ZEKA AYARI (/yapay-zeka) ----------
+// Yapay zeka Anthropic API anahtarıyla çalışır; parasını satıcı öder. Satıcı Discord'da
+// /yapay-zeka yazar, butona basıp anahtarı yapıştırır: bot küçük bir istekle dener
+// (anahtar, kredi ve model doğru mu), doğruysa ayarlar.json'a yazar ve çalışan
+// müşteri botlarını yapay zekalı hâliyle yeniden başlatır. Anahtar yokken botlar
+// "Yaren odun kes" gibi basit cümleleri yine anlar.
+const AI_KONSOL = 'https://console.anthropic.com'
+
+function yapayZekaDurumu() {
+  const satir = [
+    AI_ANAHTAR
+      ? `🤖 Yapay zeka: **açık** (model: \`${ayarlar.aiModel}\`, müşteri başı günlük sınır: ${ayarlar.aiGunlukLimit || 'sınırsız'})`
+      : '🤖 Yapay zeka: **kapalı** (anahtar yok). Botlar şimdilik "Yaren odun kes", "Yaren gel" gibi basit cümleleri anlıyor.',
+    '',
+    AI_ANAHTAR ? '**Anahtarı değiştirmek için:**' : '**Açmak için:**',
+    `1. ${AI_KONSOL} adresinde hesap aç (Google hesabınla girebilirsin).`,
+    '2. "Billing" kısmından kredi yükle (en az 5$). Yapay zeka parasını sen ödersin; müşteri başı günlük sınır faturanı korur.',
+    '3. "API Keys" > "Create Key" > "Copy".',
+    '4. Aşağıdaki **Anahtarı Gir** butonuna bas, yapıştır, Gönder. Bot dener, doğruysa kaydeder ve çalışan botlarda hemen açar.',
+  ]
+  const butonlar = [new ButtonBuilder().setCustomId('ai:anahtar').setLabel('Anahtarı Gir').setEmoji('🔑').setStyle(ButtonStyle.Primary)]
+  if (AI_ANAHTAR) butonlar.push(new ButtonBuilder().setCustomId('ai:kapat').setLabel('Yapay Zekayı Kapat').setStyle(ButtonStyle.Danger))
+  return { content: satir.join('\n'), components: [new ActionRowBuilder().addComponents(...butonlar)], flags: MessageFlags.Ephemeral }
+}
+
+function yapayZekaModal() {
+  return new ModalBuilder()
+    .setCustomId('ai:modal')
+    .setTitle('Yapay Zeka Anahtarı')
+    .addLabelComponents((l) =>
+      l
+        .setLabel('Anthropic API anahtarı')
+        .setDescription('console.anthropic.com > API Keys > Create Key > Copy')
+        .setTextInputComponent((t) =>
+          t
+            .setCustomId('anahtar')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMinLength(20)
+            .setMaxLength(300)
+            .setPlaceholder('sk-ant-api03-...')
+        )
+    )
+}
+
+// Anahtarı tek kelimelik (1 token) bir istekle dener: anahtar, kredi ve model birlikte
+// doğrulanır. Maliyeti binde bir sentin altında.
+async function aiAnahtarDene(anahtar) {
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': anahtar, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: ayarlar.aiModel, max_tokens: 1, messages: [{ role: 'user', content: 'merhaba' }] }),
+      signal: AbortSignal.timeout(20000),
+    })
+    if (r.ok || r.status === 429) return { ok: true } // 429: anahtar geçerli, sadece o an yoğun
+    const govde = await r.json().catch(() => ({}))
+    const mesaj = String(govde?.error?.message || '')
+    if (r.status === 401) return { hata: 'Anthropic bu anahtarı kabul etmedi (yanlış, eksik kopyalanmış ya da silinmiş). "Create Key" ile yenisini al.' }
+    if (r.status === 403) return { hata: 'Bu anahtarın izni yok. Console\'da anahtarın bağlı olduğu çalışma alanına bak ya da yeni anahtar al.' }
+    if (/credit|balance|billing/i.test(mesaj)) return { hata: `Anahtar doğru ama hesabında kredi yok. ${AI_KONSOL} > Billing kısmından kredi yükle, sonra tekrar dene.` }
+    if (r.status === 404) return { hata: `Anahtar doğru ama ayarlardaki model (\`${ayarlar.aiModel}\`) bulunamadı. ayarlar.json'daki ai_model'i düzelt.` }
+    return { hata: `Anthropic hata verdi (${r.status}${mesaj ? ': ' + mesaj.slice(0, 200) : ''}). Biraz sonra tekrar dene.` }
+  } catch (e) {
+    return { hata: `Anthropic'e ulaşılamadı (${e.message}). İnternetini kontrol edip tekrar dene.` }
+  }
+}
+
+// Yeni anahtarı uygular: çalışan ve lisansında yapay zeka olan botlar yeniden başlar
+function aiAnahtarUygula(anahtar) {
+  AI_ANAHTAR = anahtar
+  yonetici.apiKey = anahtar
+  let n = 0
+  for (const l of depo.ozetListe().lisanslar) {
+    if (!yonetici.calisiyor(l.userId) || !depo.aiAktifMi(l)) continue
+    yenidenBaslat.add(l.userId)
+    yonetici.durdur(l.userId)
+    log(l.kanalId, anahtar ? '🤖 Yapay zeka açıldı, botun yeniden bağlanıyor.' : '🤖 Yapay zeka kapatıldı, botun yeniden bağlanıyor.')
+    n++
+  }
+  return n
+}
+
+async function yapayZekaEtkilesim(i) {
+  if (i.isButton() && i.customId === 'ai:anahtar') return i.showModal(yapayZekaModal())
+  if (i.isButton() && i.customId === 'ai:kapat') {
+    try {
+      ayarlar.kaydet({ anthropic_api_key: '' })
+    } catch (e) {
+      return i.reply(gizli(`Ayar kaydedilemedi: ${e.message}`))
+    }
+    const n = aiAnahtarUygula('')
+    adminLog(`🤖 Yapay zeka kapatıldı (${i.user.tag}).`)
+    return i.reply(gizli(`Yapay zeka kapatıldı.${n ? ` ${n} bot yeniden başlatılıyor.` : ''} Botlar basit cümleleri anlamaya devam eder.`))
+  }
+  if (i.isModalSubmit() && i.customId === 'ai:modal') {
+    await i.deferReply({ flags: MessageFlags.Ephemeral })
+    const anahtar = i.fields.getTextInputValue('anahtar').trim().replace(/^["'`]+|["'`]+$/g, '')
+    if (/\s/.test(anahtar) || anahtar.length < 20) return i.editReply('Bu bir API anahtarına benzemiyor. Console\'da "Create Key" > "Copy" ile alınanı yapıştır.')
+    if (!anahtar.startsWith('sk-ant-')) return i.editReply('Anthropic anahtarı "sk-ant-" ile başlar. Doğru anahtarı kopyaladığından emin ol (Discord token\'ı değil).')
+    const sonuc = await aiAnahtarDene(anahtar)
+    if (!sonuc.ok) return i.editReply(`❌ ${sonuc.hata}`)
+    const notlar = []
+    try {
+      ayarlar.kaydet({ anthropic_api_key: anahtar })
+    } catch (e) {
+      notlar.push(`⚠️ Anahtar dosyaya yazılamadı (${e.message}); bot kapanınca tekrar girmen gerekir.`)
+    }
+    if (ayarlar.envden('ANTHROPIC_API_KEY')) {
+      notlar.push('⚠️ ANTHROPIC_API_KEY ortam değişkeni var: bot yeniden açılınca kaydedilen anahtar yerine o kullanılır. Onu sil ya da güncelle.')
+    }
+    const n = aiAnahtarUygula(anahtar)
+    adminLog(`🤖 Yapay zeka açıldı (${i.user.tag}, anahtar ${anahtar.slice(0, 10)}…).`)
+    return i.editReply(
+      [
+        '✅ Anahtar çalışıyor, kaydedildi. Yapay zeka **açık**.',
+        n ? `${n} çalışan bot yapay zekalı olarak yeniden başlatılıyor.` : 'Bundan sonra başlatılan botlarda açık olacak.',
+        'Müşteriler oyunda "Yaren ..." diye konuşabilir, `/soyle` ve `!otonom` çalışır. Yapay zekasız key verdiğin müşterilerde basit mod sürer.',
+        ...notlar,
+      ].join('\n')
+    )
+  }
+}
+
 
 // ---------- SLASH KOMUTLARI ----------
 const S = ApplicationCommandOptionType
@@ -838,6 +965,7 @@ const COMMANDS = [
   { name: 'panel-kaldir', description: 'Bu kanal artık key kanalı olmaz (yazılan mesajlar silinmez)', ...SATICI },
   { name: 'yonetim-kur', description: 'Butonlu yönetim panelini kurar (key ver, süre uzat/bitir, canlı süre takibi)', ...SATICI },
   { name: 'yedek', description: 'Müşteri ve key kayıtlarının yedeğini şimdi alır, sana gönderir', ...SATICI },
+  { name: 'yapay-zeka', description: 'Yapay zekayı açar/kapatır: Anthropic API anahtarını gir (bot dener, kaydeder)', ...SATICI },
   KUR_KOMUTU,
 ]
 const SATICI_KOMUTLARI = new Set(COMMANDS.filter((c) => c.default_member_permissions === '0').map((c) => c.name))
@@ -941,6 +1069,7 @@ async function sunucuyuBaslat() {
     adminLog(`Bot açıldı. Müşteri: ${depo.ozetListe().lisanslar.length}, en fazla aynı anda ${ayarlar.maxBot} bot.`)
     if (!LOG_CHANNEL_ID) console.log('Not: log kanalı ayarlı değil. Sunucuda bir kanala /kur yazarsan bot açar.')
     if (!ADMIN_ID) console.log('Not: satıcı (discord_sahip_id) ayarlı değil. Sunucu sahibi bir kanala /kur yazsın.')
+    if (!AI_ANAHTAR) adminLog('🤖 Yapay zeka kapalı (botlar basit cümleleri anlar). Açmak için Discord\'da /yapay-zeka yaz.')
     if (YETKILI_ROL_ID) {
       yetkiliRol = await guild.roles?.fetch?.(YETKILI_ROL_ID).catch(() => null)
       if (!yetkiliRol) adminLog(`⚠️ yetkili_rol_id (${YETKILI_ROL_ID}) bu sunucuda bulunamadı, yetkili rolü kapalı.`)
@@ -1353,6 +1482,7 @@ async function kurulumYap(i, guild) {
     `🎫 Key kanalı: <#${keyK.kanal.id}>${isaret(keyK)} (müşteriler keyini buraya yazar)`,
     `📜 <@&${logRol.rol.id}>${isaret(logRol)} rolü sana verildi. Bu rolü verdiğin kişi log kanallarını görür; key veremez, paneli görmez.`,
     `🧑 <@&${musteri.rol.id}>${isaret(musteri)} rolü key girenlere otomatik verilir, süresi bitince alınır.`,
+    AI_ANAHTAR ? '🤖 Yapay zeka: açık.' : '🤖 Yapay zeka kapalı: açmak için `/yapay-zeka` yaz (anahtarsız da botlar basit cümleleri anlar).',
   ]
   if (!mesajOkunur) {
     satirlar.push(
@@ -1374,6 +1504,12 @@ client.on(Events.InteractionCreate, async (i) => {
     if (i.isButton() && i.customId === 'key_gir') return await i.showModal(keyModal())
     if (i.isModalSubmit() && i.customId === 'key_modal') {
       return await keyKullan(i, i.fields.getTextInputValue('key'))
+    }
+    // yapay zeka anahtarı (sadece satıcı: faturası ona gelir)
+    if ((i.isButton() || i.isModalSubmit()) && /^ai:/.test(i.customId)) {
+      if (i.guildId !== GUILD_ID) return
+      if (i.user.id !== ADMIN_ID) return await i.reply(gizli('Yapay zeka ayarını sadece satıcı değiştirebilir.'))
+      return await yapayZekaEtkilesim(i)
     }
     // yönetim paneli butonları / formları ("yp:", "ypm:", "ypo:")
     if ((i.isButton() || i.isModalSubmit()) && /^yp[mo]?:/.test(i.customId)) {
@@ -1446,9 +1582,15 @@ async function odaKomutu(i, l) {
     if (yonetici.calisiyor(uid)) return i.editReply('Botun zaten çalışıyor. Önce /durdur yaz.')
     const son = l.son || {}
     const secilen = (ad) => (i.options.getString(ad) || '').trim()
-    const host = secilen('host') || son.host || ''
+    // "oyna.sunucu.com:25566", "http://1.2.3.4:25565/" gibi yazılanları da anla
+    const hamHost = secilen('host')
+      .replace(/^[a-z]+:\/\//i, '')
+      .replace(/\/.*$/, '')
+    const hostPort = hamHost.match(/^(.+):(\d{1,5})$/)
+    const host = (hostPort ? hostPort[1] : hamHost) || son.host || ''
     let owner = secilen('sahip') || son.owner || ''
-    const port = i.options.getInteger('port') ?? (secilen('host') ? 25565 : son.port || 25565)
+    const port = i.options.getInteger('port') ?? (hostPort ? Number(hostPort[2]) : hamHost ? 25565 : son.port || 25565)
+    if (!(port >= 1 && port <= 65535)) return i.editReply('Port 1-65535 arası bir sayı olmalı.')
     const user = secilen('kullanici') || son.user || DEFAULT_BOT_NAME
     const auth = i.options.getString('hesap') || son.auth || 'offline'
     const version = secilen('surum') || (secilen('host') ? '' : son.version || '')
@@ -1472,7 +1614,7 @@ async function odaKomutu(i, l) {
     // Sunucu cevap vermiyorsa botu boşuna başlatıp 3 kez denemesin: hemen nedenini söyle
     await i.editReply(`Sunucu yoklanıyor: **${host}:${port}**...`).catch(() => {})
     const ulasim = await sunucuyaUlasilir(host, port)
-    if (!ulasim.ok) return i.editReply(baglantiHatasiMetni(ulasim.kod, `${ulasim.host}:${ulasim.port}`))
+    if (!ulasim.ok) return i.editReply(baglantiHatasiMetni(ulasim.kod, `${ulasim.host}:${ulasim.port}`, ulasim.bedrock))
     if (yonetici.calisiyor(uid)) return i.editReply('Botun zaten çalışıyor. Önce /durdur yaz.')
     // adres kontrolü birkaç saniye sürebilir; bu arada lisans dolmuş/iptal edilmiş olabilir
     if (!depo.aktifMi(depo.bul(uid))) return i.editReply('Lisans süren doldu, bot başlatılmadı. Yeni key: /key-gir')
@@ -1624,16 +1766,16 @@ async function odaKomutu(i, l) {
   }
 
   if (i.commandName === 'soyle') {
-    if (!depo.aiAktifMi(l)) {
-      return i.reply('Lisansında yapay zeka yok (ya da süresi doldu). `/gorev` ve oyundaki `!komutlar` çalışır.')
-    }
-    if (!ayarlar.apiKey) return i.reply('Yapay zeka şu an kapalı (satıcı anahtar eklememiş).')
+    // yapay zeka yoksa (lisansta yok ya da satıcı anahtar eklememiş) bot basit cümleleri yine anlar
+    const basitMod = !depo.aiAktifMi(l) || !AI_ANAHTAR
     if (!yonetici.calisiyor(uid)) return i.reply('Botun çalışmıyor. Önce /baslat yaz.')
     await i.deferReply()
     const metin = i.options.getString('metin')
     const r = await yonetici.istek(uid, 'soyle', { metin }, 90000)
     if (r.kod !== 200) return i.editReply('Yaren cevap veremedi: ' + (r.veri?.hata || r.kod))
-    const govde = `> ${metin}\n**Yaren:** ${r.veri.cevap}`
+    const govde =
+      `> ${metin}\n**Yaren:** ${r.veri.cevap}` +
+      (basitMod ? '\n_(Basit mod: yapay zeka kapalı, "odun kes", "gel", "dur" gibi istekleri anlarım.)_' : '')
     return i.editReply({
       content: govde.length > 2000 ? govde.slice(0, 1997) + '…' : govde, // uzun cevap kaybolmasın
       allowedMentions: { parse: [] },
@@ -1669,7 +1811,7 @@ async function bilgi(i) {
   const satir = [
     `Lisans: **${depo.aktifMi(l) ? 'aktif' : l.durum === 'iptal' ? 'iptal' : 'süresi dolmuş'}**`,
     `Bitiş: ${bitisDiscord(l)}`,
-    `Yapay zeka: **${depo.aiAktifMi(l) && ayarlar.apiKey ? 'açık' : 'kapalı'}**` +
+    `Yapay zeka: **${depo.aiAktifMi(l) && AI_ANAHTAR ? 'açık' : 'kapalı'}**` +
       (depo.aiAktifMi(l) && aiBitis !== l.bitis && aiBitis ? ` (bitiş: ${zaman(aiBitis, 'R')})` : ''),
     `Bot: **${yonetici.calisiyor(l.userId) ? 'çalışıyor' : 'kapalı'}**`,
   ]
@@ -2028,6 +2170,10 @@ function kisiBilgiMetni(userId) {
 // ---------- SATICI KOMUTLARI ----------
 async function saticiKomutu(i) {
   const sessiz = { allowedMentions: { parse: [] } }
+  if (i.commandName === 'yapay-zeka') {
+    if (i.user.id !== ADMIN_ID) return i.reply(gizli('Yapay zeka ayarını sadece satıcı değiştirebilir (faturası ona gelir).'))
+    return i.reply(yapayZekaDurumu())
+  }
   if (i.commandName === 'key-olustur') {
     const s = sureOku(i)
     if (s.hata) return i.reply(gizli(s.hata))

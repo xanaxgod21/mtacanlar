@@ -9,6 +9,12 @@ ayrı çalışır.
 
 ## Yenilikler (son sürüm)
 
+- **Yapay zekayı Discord'dan aç:** `/yapay-zeka` yaz, "Anahtarı Gir"e bas, Anthropic API
+  anahtarını yapıştır. Bot dener (anahtar, kredi, model), doğruysa kaydeder ve çalışan
+  botlarda hemen açar. **Anahtarsız da çalışır:** "Yaren odun kes", "Yaren gel", "Yaren
+  dur" gibi cümleleri bot kendisi komuta çevirir; `/soyle` de basit modda cevap verir.
+- **Sunucu yoklama:** `/baslat` önce sunucuya bağlanılabiliyor mu bakar; cevap yoksa
+  botu başlatmadan nedenini söyler (sunucu kapalı, port yanlış, Bedrock sunucusu).
 - **Tek komutla kurulum:** dosya düzenlemek yok. `baslat.bat` açılınca token'ı
   sorar (yapıştır, Enter), botu sunucuna ekleme linkini açar; sunucunda `/kur`
   yazınca bot log kanallarını, Yaren Log / Yaren Müşteri rollerini, key
@@ -87,7 +93,7 @@ kapanınca botlar da kapanır; açınca çalışan müşteri botları kendiliği
 - `gunluk_yedek`: `true` ise her gün yedek alınır ve sana DM ile gelir.
 - `oda_silme_saat`: süre bitince müşterinin odası kaç saat sonra silinsin
   (0 = hemen silinir; örneğin 24 yazarsan oda 1 gün kilitli bekler, sonra silinir)
-- `anthropic_api_key`: yapay zeka için (boşsa yapay zeka kapalı)
+- `anthropic_api_key`: yapay zeka için; `/yapay-zeka` ile girilir (boşsa botlar basit modda)
 - `max_bot`: aynı anda en fazla kaç müşteri botu çalışsın (her müşteri 1 bot,
   her bot kendi sunucusuna girer). Ölçülen: bot başı ~140 MB RAM; boştayken
   neredeyse CPU yemez, görev yaparken (odun/taş) bot başı ~0,2 çekirdek.
@@ -175,6 +181,7 @@ başlar**; key beklerken süre yanmaz.
 | `/yonetim-kur` | Butonlu yönetim panelini kurar |
 | `/yedek` | Bütün müşteri ve key kayıtlarının yedeğini şimdi alır, dosyaları sana gösterir |
 | `/kur` | Log kanallarını, rolleri, key kanalını ve yönetim panelini açar ya da eksikleri tamamlar (sadece satıcı) |
+| `/yapay-zeka` | Yapay zeka durumunu gösterir; anahtarı girer/değiştirir ya da kapatır (sadece satıcı, faturası ona gelir) |
 
 Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
 

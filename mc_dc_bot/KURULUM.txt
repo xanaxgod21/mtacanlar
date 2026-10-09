@@ -83,6 +83,22 @@ Hepsi bu kadar. /kur'u tekrar yazarsan var olanları kullanır, silinmiş bir
 kanal varsa onu yeniden açar.
 
 
+YAPAY ZEKA (isteğe bağlı)
+------------------------
+Yapay zeka olmadan da bot çalışır: oyunda "Yaren odun kes", "Yaren gel",
+"Yaren dur", "Yaren sandığa bırak" gibi cümleleri kendisi anlar.
+Serbest sohbet ve otonom mod (bot kendi karar verir) için yapay zeka lazım.
+Bunun parası sana çıkar (Anthropic'e). Açmak için:
+ a. https://console.anthropic.com adresinde hesap aç (Google ile girilir).
+ b. "Billing" kısmından kredi yükle (en az 5$).
+ c. "API Keys" > "Create Key" > "Copy".
+ d. Discord'da yaz:  /yapay-zeka  > "Anahtarı Gir" butonuna bas, yapıştır,
+    Gönder. Bot anahtarı dener: yanlışsa ya da kredi yoksa söyler; doğruysa
+    kaydeder ve çalışan botlarda hemen açar. Dosya düzenlemek yok.
+Müşteri başı günlük sınır (ayarlar.json'da ai_gunluk_limit, varsayılan 200)
+faturanı korur. Kapatmak için yine /yapay-zeka > "Yapay Zekayı Kapat".
+
+
 DENE
 ----
  a. #yaren-yonetim'deki panelde "Key Oluştur" butonuna bas. Açılan formda
@@ -148,6 +164,11 @@ SORUN ÇIKARSA (siyah pencerede ya da Discord'da yazan)
         - Kendi Minecraft'ınla (Java) aynı adrese girebiliyor musun? Giremiyorsan
           sunucu kapalıdır ya da adres yanlıştır.
         Bot artık /baslat'ta sunucuyu önce yoklar; cevap yoksa başlatmadan söyler.
+        Adresi Minecraft'ta nasıl yazıyorsan öyle yaz (ör. oyna.sunucu.com ya da
+        oyna.sunucu.com:25566); panel/site IP'si (ör. :3000) oyun adresi değildir.
+ "Bu bir Bedrock sunucusu"
+     -> Sunucu telefon / Windows 10 / konsol sürümü. Bot sadece Java sürümüne
+        girer; sunucunun ayrı bir Java adresi varsa onu yaz.
  "Sunucu bağlantıyı reddetti (...)"
      -> O portta Minecraft sunucusu yok: port yanlış ya da sunucu kapalı.
  Bot sunucudan atıldıysa

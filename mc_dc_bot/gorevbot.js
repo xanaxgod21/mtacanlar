@@ -75,7 +75,7 @@ const AI_MODEL = ayarlar.aiModel
 const AI_GUNLUK_LIMIT = parseInt(process.env.AI_GUNLUK_LIMIT || '0', 10) || 0 // 0 = sınırsız
 // -----------------------------
 
-const YARDIM = 'Komutlar: !farm !odun !tas !topla !bosalt !sandik !gel !dur !durum !otonom'
+const YARDIM = 'Komutlar: !farm !odun !tas !topla !bosalt !sandik !gel !dur !durum !otonom (ya da "Yaren odun kes" gibi konuş)'
 
 const botSecenek = {
   host: HOST,
@@ -193,11 +193,34 @@ async function onOwnerMessage(username, message, _translate, satir) {
   const text = String(message).trim()
   if (text.startsWith('!')) return handleCommand(text.toLowerCase())
   const m = text.match(/^yaren[\s,:!]*(.*)$/i)
-  if (m && brain.enabled) {
+  if (m) {
     const metin = m[1] || 'merhaba'
     console.log('[duydum]', metin)
-    say(await brain.ask(metin))
+    say(brain.enabled ? await brain.ask(metin) : anahtarsizCevap(metin))
   }
+}
+
+// Yapay zeka kapalıyken (anahtar yok ya da lisansta yapay zeka yok) "Yaren ..." cümleleri:
+// sık istekler komuta çevrilir, gerisine ne anlayabildiği söylenir. Para harcamaz.
+const NIYETLER = [
+  [/\b(durum|ne yapiyorsun|neredesin|nasilsin|envanter|ne var)/, '!durum'],
+  [/\b(sandig|sandik|bosalt|depola|birak|koy)/, '!bosalt'],
+  [/\b(odun|agac|kutuk|tahta|kereste)/, '!odun'],
+  [/\b(tas|maden|kaya|kaz)/, '!tas'],
+  [/\b(tarla|farm|ekin|bugday|hasat|havuc|patates|pancar)/, '!farm'],
+  [/\b(topla|yerdeki|esyalari)/, '!topla'],
+  [/\b(gel|yanima|buraya|beni takip)/, '!gel'],
+  [/\b(dur|bekle|yeter|iptal|vazgec)/, '!dur'],
+  [/\b(yardim|komut|ne yapabilirsin|neler yapabilirsin)/, '!yardim'],
+]
+function anahtarsizCevap(metin) {
+  const t = sade(metin)
+  if (/\botonom|kendi kendine|kendin karar/.test(t)) return 'Kendi kendime karar vermem için yapay zeka lazım (satıcı açabilir). Bana ne yapacağımı söyle: odun, taş, tarla, gel...'
+  for (const [re, cmd] of NIYETLER) {
+    if (re.test(t)) return komut(cmd) || 'Tamam.'
+  }
+  if (/\b(selam|merhaba|sa\b|hey|naber)/.test(t)) return 'Merhaba! Ne yapayım? Odun keserim, taş kırarım, tarla toplarım, yanına gelirim.'
+  return 'Bunu anlamadım. Şunları anlarım: odun kes, taş kır, tarla, eşya topla, sandığa bırak, gel, dur, durum. (Satıcı yapay zekayı açarsa her şeyi konuşabiliriz.)'
 }
 bot.on('chat', onOwnerMessage)
 bot.on('whisper', onOwnerMessage) // /msg GorevBot !odun da çalışsın
@@ -519,10 +542,9 @@ async function istekIsle(tip, veri) {
     return { kod: 200, veri: { cevap: 'gönderildi' } }
   }
   if (tip === 'soyle') {
-    if (!brain.enabled) return { kod: 503, veri: { hata: 'yapay zeka kapalı' } }
     const metin = String(veri.metin || '').trim().slice(0, 500)
     console.log('[duydum]', metin)
-    const cevap = await brain.ask(metin || 'merhaba')
+    const cevap = brain.enabled ? await brain.ask(metin || 'merhaba') : anahtarsizCevap(metin || 'merhaba')
     console.log('[yaren]', cevap)
     return { kod: 200, veri: { cevap } }
   }

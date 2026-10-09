@@ -7,6 +7,7 @@
 
 const dns = require('dns').promises
 const net = require('net')
+const dgram = require('dgram')
 
 function ozelAdres(ip) {
   if (net.isIPv6(ip)) {
@@ -108,16 +109,68 @@ function tcpDene(ip, port, ms = 8000) {
   })
 }
 
-// /baslat'ta botu başlatmadan önce: adresi (SRV dahil) çöz, sunucuya bağlanılabiliyor mu bak
+// Bedrock (telefon / Windows 10 / konsol) sunucusu mu: RakNet "unconnected ping" (UDP).
+// Cevap verirse { surum, motd }, vermezse null. Bot Bedrock sunucularına giremez.
+const RAKNET_SIHIR = Buffer.from('00ffff00fefefefefdfdfdfd12345678', 'hex')
+function bedrockDene(ip, port, ms = 2500) {
+  return new Promise((coz) => {
+    let soket
+    try {
+      soket = dgram.createSocket(net.isIPv6(ip) ? 'udp6' : 'udp4')
+    } catch (_) {
+      return coz(null)
+    }
+    let bitti = false
+    const bitir = (sonuc) => {
+      if (bitti) return
+      bitti = true
+      clearTimeout(zaman)
+      try {
+        soket.close()
+      } catch (_) {}
+      coz(sonuc)
+    }
+    const zaman = setTimeout(() => bitir(null), ms)
+    soket.on('error', () => bitir(null))
+    soket.on('message', (m) => {
+      // 0x1c: unconnected pong = id(1) zaman(8) sunucuGuid(8) sihir(16) uzunluk(2) "MCPE;motd;protokol;sürüm;..."
+      if (m[0] !== 0x1c || m.length < 35 || !m.subarray(17, 33).equals(RAKNET_SIHIR)) return
+      const metin = m.subarray(35, 35 + m.readUInt16BE(33)).toString('utf8').split(';')
+      bitir({ surum: metin[3] || '', motd: metin[1] || '' })
+    })
+    const paket = Buffer.alloc(33)
+    paket[0] = 0x01
+    paket.writeBigInt64BE(BigInt(Date.now()), 1)
+    RAKNET_SIHIR.copy(paket, 9)
+    paket.writeBigInt64BE(2n, 25)
+    soket.send(paket, port, ip, (e) => e && bitir(null))
+  })
+}
+
+// /baslat'ta botu başlatmadan önce: adresi (SRV dahil) çöz, sunucuya bağlanılabiliyor mu bak.
+// Java bağlantısı olmazsa Bedrock sunucusu mu diye de bakar (aynı port ve Bedrock'un 19132'si).
 async function sunucuyaUlasilir(host, port, dnsFn, ms) {
   const r = await hedefCoz(host, port, dnsFn)
   if (!r.adresler.length) return { kod: r.hata || 'ENOTFOUND', host: r.host, port: r.port }
-  return { ...(await tcpDene(r.adresler[0], r.port, ms)), host: r.host, port: r.port }
+  const ip = r.adresler[0]
+  const tcp = await tcpDene(ip, r.port, ms)
+  if (!tcp.ok) {
+    const portlar = [...new Set([r.port, 19132])]
+    const cevaplar = await Promise.all(portlar.map((p) => bedrockDene(ip, p))) // aynı anda: en fazla ~2,5 sn
+    const n = cevaplar.findIndex(Boolean)
+    if (n >= 0) return { kod: 'BEDROCK', bedrock: { ...cevaplar[n], port: portlar[n] }, host: r.host, port: r.port }
+  }
+  return { ...tcp, host: r.host, port: r.port }
 }
 
 // Bağlantı hatalarının müşteriye anlaşılır açıklaması (ham hata yığını yerine)
-function baglantiHatasiMetni(kod, adres) {
+function baglantiHatasiMetni(kod, adres, ek = {}) {
   switch (kod) {
+    case 'BEDROCK':
+      return (
+        `Bu bir **Bedrock** sunucusu (${adres}${ek.surum ? `, sürüm ${ek.surum}` : ''}): telefon / Windows 10 / konsol sürümü. ` +
+        'Bot sadece **Java** sürümü sunuculara girebilir, Bedrock\'a giremez. Sunucunun ayrı bir Java adresi/portu varsa onu yaz.'
+      )
     case 'ETIMEDOUT':
       return (
         `Sunucu cevap vermedi (${adres}). Olası nedenler: sunucu kapalı, adres ya da port yanlış, ` +
