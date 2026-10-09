@@ -22,9 +22,7 @@
 
 const fs = require('fs')
 const net = require('net')
-const readline = require('readline')
-const { Writable } = require('stream')
-const { spawn } = require('child_process')
+const { spawn, execFileSync } = require('child_process')
 const zlib = require('zlib')
 const path = require('path')
 const {
@@ -2666,27 +2664,127 @@ const tokenTemizle = (t) =>
     .replace(/^(Bot|Bearer)\s+/i, '')
     .trim()
 
-// Gizli soru: yazılan/yapıştırılan ekrana hiç basılmaz (token ekran görüntüsünde görünmesin).
-// Ctrl+C ya da pencere girişi kapanırsa bot kapanır (takılı kalmaz).
-function gizliSor(metin) {
+// Token konsola yazılır/yapıştırılır: her karakter yerine * görünür (token ekranda
+// kalmasın ama yapıştırmanın işe yaradığı görülsün). Boş Enter ya da eski konsoldaki
+// Ctrl+V (^V) panodaki metni alır. Ctrl+C bot'u kapatır (takılı kalmaz).
+function tokenOku(metin) {
   return new Promise((coz) => {
+    const girdi = process.stdin
     process.stdout.write(metin)
-    const sessiz = new Writable({ write: (_parca, _kod, cb) => cb() })
-    const rl = readline.createInterface({ input: process.stdin, output: sessiz, terminal: !!process.stdin.isTTY })
-    let cevaplandi = false
-    const cik = () => {
-      if (cevaplandi) return
-      process.stdout.write('\n')
-      process.exit(0)
+    let deger = ''
+    const ekle = (s) => {
+      deger += s
+      process.stdout.write('*'.repeat([...s].length))
     }
-    rl.on('SIGINT', cik)
-    rl.on('close', cik)
-    rl.question('', (cevap) => {
-      cevaplandi = true
-      rl.close()
-      coz(cevap)
-    })
+    const bitir = () => {
+      girdi.removeListener('data', veri)
+      if (girdi.isTTY) girdi.setRawMode(false)
+      girdi.pause()
+      process.stdout.write('\n')
+      coz(deger)
+    }
+    const veri = (parca) => {
+      // ok tuşları, yapıştırma işaretleri (ESC [ ... ) gibi diziler atılır
+      const temiz = String(parca).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b./g, '')
+      for (const ch of temiz) {
+        if (ch === '\r' || ch === '\n') return bitir()
+        if (ch === '\u0003' || (ch === '\u0004' && !deger)) {
+          process.stdout.write('\n')
+          process.exit(0)
+        }
+        if (ch === '\u0016') {
+          ekle(panoyuOku())
+          continue
+        }
+        if (ch === '\u007f' || ch === '\b') {
+          if (deger) {
+            deger = [...deger].slice(0, -1).join('')
+            process.stdout.write('\b \b')
+          }
+          continue
+        }
+        if (ch >= ' ') ekle(ch)
+      }
+    }
+    if (girdi.isTTY) girdi.setRawMode(true)
+    girdi.setEncoding('utf8')
+    girdi.on('data', veri)
+    girdi.resume()
   })
+}
+
+// Panodaki (kopyalanan) metin; okunamazsa ''
+function panoyuOku() {
+  const calistir = (komut, argumanlar) => {
+    try {
+      return execFileSync(komut, argumanlar, { encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim()
+    } catch (_) {
+      return ''
+    }
+  }
+  if (process.platform === 'win32') return calistir('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-Command', 'Get-Clipboard -Raw'])
+  if (process.platform === 'darwin') return calistir('pbpaste', [])
+  return calistir('xclip', ['-o', '-selection', 'clipboard']) || calistir('wl-paste', ['-n'])
+}
+
+// Windows'ta token'ı küçük bir pencerede sorar (Ctrl+V ve sağ tık > Yapıştır orada
+// her zaman çalışır, yazılan nokta nokta görünür). { metin } | { iptal: true } | null (açılamadı)
+function pencereyleSor(mesaj) {
+  if (process.platform !== 'win32' || process.env.YAREN_PENCERESIZ) return null
+  const tirnak = (s) => "'" + String(s).replace(/'/g, "''") + "'"
+  const betik = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    'Add-Type -AssemblyName System.Drawing',
+    '[System.Windows.Forms.Application]::EnableVisualStyles()',
+    '$f = New-Object System.Windows.Forms.Form',
+    "$f.Text = 'Yaren - Discord bot token'",
+    '$f.ClientSize = New-Object System.Drawing.Size(540, 140)',
+    "$f.StartPosition = 'CenterScreen'",
+    '$f.TopMost = $true',
+    "$f.FormBorderStyle = 'FixedDialog'",
+    '$f.MaximizeBox = $false',
+    '$f.MinimizeBox = $false',
+    '$l = New-Object System.Windows.Forms.Label',
+    `$l.Text = ${tirnak(mesaj)}`,
+    '$l.SetBounds(12, 10, 516, 44)',
+    '$t = New-Object System.Windows.Forms.TextBox',
+    '$t.SetBounds(12, 60, 516, 24)',
+    '$t.UseSystemPasswordChar = $true',
+    '$b = New-Object System.Windows.Forms.Button',
+    "$b.Text = 'Tamam'",
+    '$b.SetBounds(438, 98, 90, 30)',
+    '$b.DialogResult = [System.Windows.Forms.DialogResult]::OK',
+    '$f.AcceptButton = $b',
+    '$f.Controls.AddRange(@($l, $t, $b))',
+    '$f.Add_Shown({ $f.Activate(); $t.Focus() })',
+    "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write('OK:' + $t.Text) } else { [Console]::Out.Write('IPTAL') }",
+  ].join('\n')
+  try {
+    const cikti = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(betik, 'utf16le').toString('base64')],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }
+    )
+    if (cikti.startsWith('OK:')) return { metin: cikti.slice(3) }
+    if (cikti.startsWith('IPTAL')) return { iptal: true }
+    return null
+  } catch (_) {
+    return null
+  }
+}
+
+// Son çare: klasöre token.txt koyup içine token yapıştırılırsa okunur ve dosya silinir
+// (uzantılar gizliyken "token.txt" adı verilince dosya token.txt.txt olur, o da okunur)
+function tokenDosyasiOku() {
+  for (const ad of ['token.txt', 'token.txt.txt']) {
+    const dosya = path.join(__dirname, ad)
+    try {
+      const t = fs.readFileSync(dosya, 'utf-8').replace(/^\uFEFF/, '')
+      fs.rmSync(dosya, { force: true }) // token düz dosyada kalmasın
+      if (t.trim()) return t
+    } catch (_) {}
+  }
+  return ''
 }
 
 // Token'la uygulama bilgisini al: { uygulama } ya da { yanlis: true } / { hata }
@@ -2701,8 +2799,9 @@ async function tokenDene(token) {
 }
 
 async function tokenSor(neden) {
-  if (!process.stdin.isTTY) {
-    console.error(`${neden} Botu bir kere komut penceresinde (node discordbot.js) aç, token'ı yapıştır; ya da ayarlar.json'a "discord_token" yaz.`)
+  const dosyadan = tokenDosyasiOku()
+  if (!process.stdin.isTTY && !dosyadan) {
+    console.error(`${neden} Botu bir kere komut penceresinde (node discordbot.js) aç, token'ı yapıştır; ya da bu klasöre token.txt koyup içine token'ı yaz.`)
     process.exit(1)
   }
   console.log('')
@@ -2711,34 +2810,60 @@ async function tokenSor(neden) {
   console.log('1) https://discord.com/developers/applications adresine gir.')
   console.log('2) "New Application" > ad ver (ör. Yaren) > Create.')
   console.log('3) Soldan "Bot" > "Reset Token" > "Yes, do it!" > "Copy".')
-  console.log('4) Buraya yapıştır (sağ tık ya da Ctrl+V) ve Enter\'a bas.')
-  console.log('   Yapıştırınca ekranda görünmez, bu normal: Enter\'a bas.')
+  if (process.platform === 'win32') {
+    console.log('4) Açılan küçük "Yaren" penceresine token\'ı yapıştır (Ctrl+V ya da sağ tık >')
+    console.log('   Yapıştır) ve Tamam\'a bas. Pencere çıkmazsa buraya yapıştırıp Enter\'a bas;')
+    console.log('   ya da kopyaladıktan sonra sadece Enter\'a bas, bot panodan kendisi alır.')
+  } else {
+    console.log('4) Buraya yapıştır ve Enter\'a bas (her harf * olarak görünür).')
+    console.log('   Kopyaladıktan sonra sadece Enter\'a basarsan bot panodan almayı dener.')
+  }
   console.log('   Token botun şifresidir: kimseye gösterme.')
   console.log('========================================================')
+  let pencereMesaji = "Discord bot token'ını aşağıya yapıştır (Ctrl+V ya da sağ tık > Yapıştır) ve Tamam'a bas."
+  let pencereYok = false
+  let ham = dosyadan
+  if (dosyadan) console.log('token.txt dosyasındaki token deneniyor (dosya silindi).')
   for (;;) {
-    const token = tokenTemizle(await gizliSor('Token: '))
-    console.log(token ? token.slice(0, 6) + '… (gizlendi)' : '(boş)')
+    if (!ham && !pencereYok) {
+      const r = pencereyleSor(pencereMesaji)
+      if (!r) pencereYok = true // PowerShell / pencere yok: konsoldan sor
+      else if (r.iptal) {
+        pencereYok = true
+        console.log('Pencere kapatıldı: token\'ı buraya yapıştırıp Enter\'a bas.')
+      } else ham = r.metin
+    }
+    if (!ham) {
+      if (!process.stdin.isTTY) process.exit(1) // token.txt yanlıştı, soracak konsol yok
+      ham = await tokenOku('Token: ')
+      if (!ham.trim()) {
+        ham = panoyuOku()
+        console.log(ham ? '(Kopyaladığın metin panodan alındı.)' : '(Boş: token\'ı kopyalayıp yapıştır ya da kopyaladıktan sonra Enter\'a bas.)')
+      }
+    }
+    const token = tokenTemizle(ham)
+    ham = ''
     if (!token) continue
+    console.log('Token: ' + token.slice(0, 6) + '… (gizlendi)')
+    let sorun = ''
     if (!/^[\w-]+\.[\w-]+\.[\w-]+$/.test(token)) {
-      console.log('Bu bir bot token\'ına benzemiyor (noktayla ayrılmış 3 parça olmalı). Bot sayfasındaki "Reset Token" ile alınanı yapıştır.')
-      continue
+      sorun = 'Bu bir bot token\'ına benzemiyor (noktayla ayrılmış 3 parça olmalı). Bot sayfasındaki "Reset Token" ile alınanı kopyala.'
+    } else {
+      const r = await tokenDene(token)
+      if (r.yanlis) sorun = 'Discord bu token\'ı kabul etmedi. "Reset Token" ile yenisini alıp tekrar yapıştır.'
+      else if (r.hata) sorun = `Discord'a ulaşılamadı (${r.hata}). İnternetini kontrol edip tekrar dene.`
+      else {
+        try {
+          ayarlar.kaydet({ discord_token: token })
+          console.log('Token kaydedildi (ayarlar.json). Bir daha sorulmayacak.')
+        } catch (e) {
+          console.log(`Token dosyaya yazılamadı (${e.message}); bot bu sefer çalışır, bir dahaki açılışta tekrar sorar.`)
+        }
+        return { token, uygulama: r.uygulama }
+      }
     }
-    const r = await tokenDene(token)
-    if (r.yanlis) {
-      console.log('Discord bu token\'ı kabul etmedi. "Reset Token" ile yenisini alıp tekrar yapıştır.')
-      continue
-    }
-    if (r.hata) {
-      console.log(`Discord'a ulaşılamadı (${r.hata}). İnternetini kontrol edip tekrar yapıştır.`)
-      continue
-    }
-    try {
-      ayarlar.kaydet({ discord_token: token })
-      console.log('Token kaydedildi (ayarlar.json). Bir daha sorulmayacak.')
-    } catch (e) {
-      console.log(`Token dosyaya yazılamadı (${e.message}); bot bu sefer çalışır, bir dahaki açılışta tekrar sorar.`)
-    }
-    return { token, uygulama: r.uygulama }
+    console.log(sorun)
+    pencereMesaji = sorun
   }
 }
 

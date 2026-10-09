@@ -33,13 +33,22 @@ Kanalları, rolleri ve panelleri bot kendisi açar. Toplam 5-10 dk.
 
 3) TOKEN'I YAPIŞTIR
 -------------------
-Siyah pencere "Token:" diye sorar. 1-c'de kopyaladığın token'ı yapıştır
-(sağ tık ya da Ctrl+V) ve Enter'a bas. Yapıştırınca ekranda görünmez, bu
-normal (token gizli kalsın diye).
- - Doğruysa "Token kaydedildi" der, bir daha sormaz.
- - Yanlışsa nedenini söyler, tekrar sorar.
- - Sonradan Developer Portal'da "Reset Token" yaparsan bot bir sonraki
-   açılışta eskisinin geçmediğini anlar, yenisini sorar.
+baslat.bat açılınca küçük bir "Yaren - Discord bot token" penceresi açılır.
+1-c'de kopyaladığın token'ı kutuya yapıştır (Ctrl+V ya da sağ tık > Yapıştır), "Tamam"a bas.
+Kutuda nokta nokta görünür (token gizli kalsın diye).
+ - Doğruysa siyah pencere "Token kaydedildi" der, bir daha sormaz.
+ - Yanlışsa pencere nedenini yazıp tekrar açılır.
+
+Küçük pencere çıkmazsa siyah pencere "Token:" diye sorar:
+ - Token'ı kopyaladıktan sonra SADECE Enter'a bas: bot kopyaladığın token'ı
+   kendisi alır. (Ya da sağ tık / Ctrl+V ile yapıştır; her harf * olarak
+   görünür, sonra Enter.)
+ - O da olmazsa: bu klasörde boş yere sağ tık > Yeni > Metin Belgesi, adını
+   "token" yap, açıp token'ı içine yapıştır, kaydet, baslat.bat'ı yeniden
+   aç. Bot token'ı okur ve dosyayı siler.
+
+Sonradan Developer Portal'da "Reset Token" yaparsan bot bunu anlar ve
+yenisini sorar.
 
 
 4) BOTU SUNUCUNA EKLE
@@ -143,7 +152,9 @@ SORUN ÇIKARSA (siyah pencerede ya da Discord'da yazan)
  "Token geçersiz oldu"
      -> Developer Portal'da token sıfırlanmış. Bot kendini yeniden açar ve
         yeni token'ı sorar.
- Token yapıştırırken ekranda bir şey görünmüyor
-     -> Normal, token gizli tutuluyor. Yapıştır ve Enter'a bas.
+ Token'ı yapıştıramıyorum
+     -> Token'ı kopyala, siyah pencereye bir kere tıkla ve sadece Enter'a
+        bas: bot panodan kendisi alır. Pencere başlığında "Seç" / "Select"
+        yazıyorsa önce Esc'e bas. Olmazsa adım 3'teki token.txt yolunu kullan.
 
 Bütün komutlar ve özellikler: OKUBENI.md
