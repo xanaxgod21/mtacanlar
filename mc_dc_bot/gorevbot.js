@@ -2210,6 +2210,7 @@ async function madenTask(id, secenek = {}) {
   let hatalar = 0
   let sonYukseltme = Date.now()
   let sonInisY = null
+  let inisEngel = 0 // inemeyip yana tünel açtığı adım
   const tunelSiniri = hedefY !== null ? TUNEL_SINIRI * 3 : TUNEL_SINIRI
   while (calisiyor(id)) {
     let hedef = null
@@ -2237,10 +2238,16 @@ async function madenTask(id, secenek = {}) {
         const y = Math.floor(bot.entity.position.y)
         if (y % 10 === 0 && y !== sonInisY) console.log(`[maden] İniyorum: y=${(sonInisY = y)}`)
         if (r === 'kazma') return gorevNotu(id, 'Kazmam kırıldı, bana yeni bir kazma ver.')
+        if (r === 'kapali' && ++inisEngel <= 8) {
+          // her yönde mağara, su ya da eski kuyu var: yana tünel açıp başka yerden inmeyi dene
+          const t = await tunelAdimi(id)
+          if (t === 'kazma') return gorevNotu(id, 'Kazmam kırıldı, bana yeni bir kazma ver.')
+          if (t !== 'kapali') continue
+        }
         if (r === 'kapali') {
           iniyor = false
           console.log(`[maden] Daha aşağı inemiyorum (önüm lav, su ya da boşluk), y=${Math.floor(bot.entity.position.y)} seviyesinde arıyorum.`)
-        }
+        } else inisEngel = 0
         hatalar = 0
         continue
       }
