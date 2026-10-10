@@ -2098,7 +2098,10 @@ function cevherBul(skipped, enFazla = null, secici = null) {
 
 // Önündeki blokları güvenliyse kazar: lav/su/boşluk ya da kazmadığı blok varsa 'kapali'
 const kazilabilirMi = (b) => b.boundingBox === 'empty' || MADEN_TASI.has(b.name) || (cevherMi(b) && kazmaYeter(b))
-const tehlikeli = (b) => !b || b.name === 'lava' || b.name === 'water' || lavYakin(b.position)
+// Su da sayılır: yanındaki suyu açarsa su basar, bot boğulur
+const SULU = /^(water|lava|bubble_column|kelp|kelp_plant|seagrass|tall_seagrass)$/
+const suYakin = (pos) => komsular(pos).some((b) => b && SULU.test(b.name))
+const tehlikeli = (b) => !b || SULU.test(b.name) || suYakin(b.position)
 async function yolAc(id, bloklar) {
   for (const b of bloklar) {
     if (b.boundingBox === 'empty') continue
@@ -2147,7 +2150,11 @@ async function inisAdimi(id) {
     const engel =
       !zemin || zemin.boundingBox !== 'block'
         ? `basamağın altında ${zemin ? zemin.name : 'yüklenmemiş yer'}`
-        : [zemin, ...bloklar].find(tehlikeli)?.name || bloklar.find((b) => !kazilabilirMi(b))?.name || null
+        : (() => {
+            const t = [zemin, ...bloklar].find(tehlikeli)
+            if (t) return SULU.test(t.name) ? t.name : `${t.name} (arkasında su/lav)`
+            return bloklar.find((b) => !kazilabilirMi(b))?.name || null
+          })()
     if (engel) {
       sonInisEngeli = engel
       tunelYonu = (tunelYonu + 1) % 4
@@ -2414,8 +2421,9 @@ async function balikTask(id) {
     .filter((b) => b && bot.blockAt(b.position.offset(0, 1, 0))?.boundingBox === 'empty')
     .sort((a, b) => a.position.distanceTo(bot.entity.position) + (acikSu(a) ? 0 : 8) - b.position.distanceTo(bot.entity.position) - (acikSu(b) ? 0 : 8))[0]
   if (!su) return gorevNotu(id, 'Yakında su göremiyorum. Beni suyun kenarına götür.')
-  if (su.position.distanceTo(bot.entity.position) > 6) {
-    await gotoTimeout(new goals.GoalNear(su.position.x, su.position.y + 1, su.position.z, 4), 30000).catch(() => {})
+  // olta 2-4 blok gider: suyun dibine kadar gel (uzaktan atınca kıyıya düşer)
+  if (su.position.distanceTo(bot.entity.position) > 3) {
+    await gotoTimeout(new goals.GoalNear(su.position.x, su.position.y + 1, su.position.z, 2), 30000).catch(() => {})
   }
   let tutulan = 0
   let hata = 0
@@ -2432,7 +2440,7 @@ async function balikTask(id) {
       if (bot.heldItem?.slot !== olta.slot) await bot.equip(olta, 'hand')
       await bot.lookAt(su.position.offset(0.5, 1, 0.5), true)
       const once = envanterSayim()
-      await balikBekle(45000)
+      await balikBekle(90000) // çatı altında ya da yavaş sunucuda vurmak 1 dakikayı geçebilir
       hata = 0
       await sleep(600) // tutulan eşya envantere gelsin
       for (const [ad, n] of envanterSayim()) {
@@ -2447,6 +2455,7 @@ async function balikTask(id) {
         bot.activateItem() // oltayı geri çek
       } catch (_) {}
       if (savas.savasta()) continue
+      console.log(`[balik] olmadı: ${e.message || e}`)
       if (++hata >= 5) return gorevNotu(id, 'Balık tutamıyorum (olta suya düşmüyor olabilir). Beni suyun kenarına götür.')
       await sleep(1500)
     }
@@ -2532,6 +2541,30 @@ for (const sinyal of ['SIGTERM', 'SIGINT']) {
     setTimeout(() => process.exit(0), 500)
   })
 }
+
+// ---------- NEFES ----------
+// Su basarsa boğulmasın: nefesi azalınca işi bırakıp yüzeye doğru yüzer
+let bogulma = false
+setInterval(() => {
+  if (!hazir || !bot.entity || !(bot.health > 0)) return
+  const az = typeof bot.oxygenLevel === 'number' && bot.oxygenLevel < 10 && bot.entity.isInWater
+  if (az) {
+    if (!bogulma) {
+      bogulma = true
+      console.log('[olay] Su bastı, nefesim azaldı, yukarı çıkıyorum.')
+      try {
+        bot.stopDigging()
+        bot.pathfinder.setGoal(null)
+      } catch (_) {}
+    }
+    bot.setControlState('jump', true)
+    bot.setControlState('forward', true)
+  } else if (bogulma) {
+    bogulma = false
+    bot.setControlState('jump', false)
+    bot.setControlState('forward', false)
+  }
+}, 250).unref()
 
 // ---------- ÖLÜM ----------
 // Ölünce odaya haber verir ([olum] satırı: Discord sahibini etiketler). Doğunca ölüm
