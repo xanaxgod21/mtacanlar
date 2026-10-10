@@ -1,0 +1,16 @@
+{
+  "name": "sunucu-kopyala",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bir Discord sunucusundaki secilen kanallari ve rolleri baska bir sunucuya kopyalar",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20.18"
+  },
+  "dependencies": {
+    "discord.js-selfbot-v13": "3.7.1"
+  }
+}
