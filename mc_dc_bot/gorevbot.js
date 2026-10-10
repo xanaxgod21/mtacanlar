@@ -2365,6 +2365,7 @@ async function xpTask(id) {
 function balikBekle(ms) {
   return new Promise((resolve, reject) => {
     let bitti = false
+    let cekildi = false // oltayı sesten biz çektik: mineflayer'ın "iptal" hatası sayılmaz
     let sesZamanlayici = null
     const son = (hata) => {
       if (bitti) return
@@ -2382,6 +2383,7 @@ function balikBekle(ms) {
       if (!bizim) return
       sesZamanlayici = setTimeout(async () => {
         if (bitti) return
+        cekildi = true
         bot.activateItem() // oltayı çek
         // mineflayer eski şamandırayı bıraksın, yoksa sonraki atışı yanlışlıkla iptal eder
         for (let i = 0; i < 15 && bot.entities[bizim.id] === bizim; i++) await sleep(100)
@@ -2401,7 +2403,9 @@ function balikBekle(ms) {
     }, 5000)
     bot.fish().then(
       () => son(),
-      (e) => son(e)
+      (e) => {
+        if (!cekildi) son(e)
+      }
     )
   })
 }
@@ -2451,9 +2455,12 @@ async function balikTask(id) {
       if (tutulan % 10 === 0) console.log(`[balik] ${tutulan} kez tuttum.`)
     } catch (e) {
       if (id !== taskId) return
-      try {
-        bot.activateItem() // oltayı geri çek
-      } catch (_) {}
+      // olta hâlâ suyun üstündeyse geri çek (yoksa tıklamak yeniden atar)
+      if (Object.values(bot.entities).some((x) => x.name === 'fishing_bobber' && x.position.distanceTo(bot.entity.position) < 30)) {
+        try {
+          bot.activateItem()
+        } catch (_) {}
+      }
       if (savas.savasta()) continue
       console.log(`[balik] olmadı: ${e.message || e}`)
       if (++hata >= 5) return gorevNotu(id, 'Balık tutamıyorum (olta suya düşmüyor olabilir). Beni suyun kenarına götür.')
