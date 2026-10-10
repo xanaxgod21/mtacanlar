@@ -1,0 +1,37 @@
+name: Build Sunucu Tasima EXE
+
+# Windows makinede sunucu_tasima.py'yi tek dosyalik .exe olarak derler
+# ve sonucu indirilebilir artifact olarak yukler.
+
+on:
+  workflow_dispatch:      # Actions sekmesinden elle calistirilir
+  push:
+    branches:
+      - claude/gifted-gates-pufg2k
+    paths:
+      - sunucu_tasima/**
+      - .github/workflows/build-sunucu-tasima.yml
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyinstaller -r sunucu_tasima/requirements.txt
+
+      - name: Build EXE
+        run: pyinstaller --onefile --console --name sunucu_tasima sunucu_tasima/sunucu_tasima.py
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: sunucu_tasima-windows
+          path: dist/sunucu_tasima.exe
