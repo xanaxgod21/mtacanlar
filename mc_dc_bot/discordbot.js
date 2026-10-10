@@ -227,7 +227,7 @@ yonetici.on('saticiLog', (botId, line) => {
 // kimseyi etiketlemez); atılınca ve otomatik bağlanma bırakılınca DM de gelir.
 // Aynı olay art arda gelirse (ör. ölüp duruyor) etiketleme seyrekleşir.
 const sonBildirim = new Map() // `${botId}:${tur}` -> zaman
-const BILDIRIM_ARALIK = { olum: 2 * 60000, atildi: 10 * 60000, birakti: 0 }
+const BILDIRIM_ARALIK = { olum: 2 * 60000, atildi: 10 * 60000, birakti: 0, cokOldu: 0 }
 async function onemliBildir(l, n, tur, metin, { dm = false } = {}) {
   const anahtar = `${botKimligi(l.userId, n)}:${tur}`
   if (Date.now() - (sonBildirim.get(anahtar) || 0) < BILDIRIM_ARALIK[tur]) return
@@ -241,8 +241,11 @@ async function onemliBildir(l, n, tur, metin, { dm = false } = {}) {
 }
 function olayBildir(l, n, line) {
   try {
-    let m = line.match(/^\[olum\] (Öldüm.*?)(?: Doğunca eşyalarımı toplamaya gideceğim\.)?$/)
-    if (m) return void onemliBildir(l, n, 'olum', `💀 ${m[1]} Doğunca eşyalarını toplayıp işine dönecek.`)
+    let m = line.match(/^\[olum\] Öldüm(.*?)(?: Doğunca eşyalarımı toplamaya gideceğim\.)?$/)
+    if (m) return void onemliBildir(l, n, 'olum', `💀 Bot öldü${m[1]} Doğunca eşyalarını toplayıp işine dönecek.`)
+    if (/^\[olum\] 10 dakikada 3 kez öldüm/.test(line)) {
+      return void onemliBildir(l, n, 'cokOldu', '💀 Bot kısa sürede 3 kez öldü, işi bıraktı. Güvenli bir yere götürüp yeniden iş ver.')
+    }
     m = line.match(/^\[olay\] Sunucudan atıldı: (.*)$/)
     if (m) return void onemliBildir(l, n, 'atildi', `⚠️ Bot sunucudan atıldı: ${m[1].slice(0, 300)}`, { dm: true })
   } catch (_) {}
@@ -1854,7 +1857,8 @@ async function odaKomutu(i, l) {
         (auth === 'microsoft' ? '\nMicrosoft girişi için kod birazdan burada görünecek.' : '') +
         (owner
           ? `\nOyunda **${owner}** oyuncusunun yazdıklarını yapacak. Değiştirmek için: \`/sahip ad:YeniAd\``
-          : '\nBot girince `/sahip ad:OyundakiAdın` yaz: bot oyunda sadece senin yazdıklarını yapar.')
+          : '\nBot girince `/sahip ad:OyundakiAdın` yaz: bot oyunda sadece senin yazdıklarını yapar.') +
+        (n > 1 && !yonetici.sunucuSifresi(bid, host, port) ? `\nSunucu girişte şifre istiyorsa bu botun şifresini ayrıca ver: \`/giris bot:${n} sifre:...\`` : '')
     )
   }
 

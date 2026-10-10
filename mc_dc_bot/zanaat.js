@@ -76,9 +76,10 @@ module.exports = function kurZanaat(bot, ay) {
   }
 
   // ---------- yere koyma / geri alma ----------
-  function yerBul() {
+  // Blok koymaya uygun yerler, yakından uzağa
+  function yerler() {
     const ben = bot.entity.position.floored()
-    let en = null
+    const hepsi = []
     for (let dx = -2; dx <= 2; dx++) {
       for (let dz = -2; dz <= 2; dz++) {
         for (let dy = -1; dy <= 1; dy++) {
@@ -92,30 +93,33 @@ module.exports = function kurZanaat(bot, ay) {
           if (p.x === ben.x && p.z === ben.z) continue
           const d = p.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position.offset(0, 1.6, 0))
           if (d > 4) continue
-          if (!en || d < en.d) en = { p, alt, d }
+          hepsi.push({ p, alt, d })
         }
       }
     }
-    return en
+    return hepsi.sort((a, b) => a.d - b.d)
   }
 
   async function koy(ad) {
-    const it = ilk(ad)
-    if (!it) throw new Error(`${ad} yok`)
-    const yer = yerBul()
-    if (!yer) throw new Error('koyacak yer bulamadım')
-    await bot.equip(it, 'hand')
     const { Vec3 } = require('vec3')
-    try {
-      await bot.placeBlock(yer.alt, new Vec3(0, 1, 0))
-    } catch (e) {
-      // sunucu geç onaylayabilir: blok yerinde mi bak
-      await sleep(500)
-      if (bot.blockAt(yer.p)?.name !== ad) throw e
+    const adaylar = yerler()
+    if (!adaylar.length) throw new Error('koyacak yer bulamadım')
+    let hata = null
+    // sunucu bir yeri reddedebilir (yanındaki oyuncu, eklenti): birkaç yer dener
+    for (const yer of adaylar.slice(0, 3)) {
+      const it = ilk(ad)
+      if (!it) throw new Error(`${ad} yok`)
+      await bot.equip(it, 'hand')
+      try {
+        await bot.placeBlock(yer.alt, new Vec3(0, 1, 0))
+      } catch (e) {
+        hata = e
+        await sleep(500) // sunucu geç onaylayabilir: blok yerinde mi bak
+      }
+      const b = bot.blockAt(yer.p)
+      if (b && b.name === ad) return b
     }
-    const b = bot.blockAt(yer.p)
-    if (!b || b.name !== ad) throw new Error(`${ad} konamadı`)
-    return b
+    throw hata || new Error(`${ad} konamadı`)
   }
 
   async function geriAl(blok, aletTuru) {

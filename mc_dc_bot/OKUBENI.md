@@ -46,6 +46,9 @@ ayrı çalışır.
   2. bot ilk seferde 1. botun sunucusunu ve sahibini alır, adının sonuna 2 eklenir.
   Komutlarda `bot:` seçer, odaya "2: odun kes" ya da "bot2 maden kaz" yazar. Loglar
   `[Bot 1]` / `[Bot 2]` etiketli düşer. `/durum` hepsini gösterir, `/durdur` hepsini durdurur.
+  Oyunda sahibin yazdığı `!odun` gibi komutları aynı sunucudaki botların hepsi yapar;
+  tek bota iş vermek için odadan "2: ..." yazılır. Sunucu şifresi (`/giris`) her bot
+  için ayrıdır (`/giris bot:2 sifre:...`).
 - **Odaya yazman yeter:** müşteri odasına düz yazı yazar, bot yapar: "odun kes",
   "maden kaz", "taş kır", "gel", "dur", "durum". Cevabı mesaja yanıt olarak gelir.
   Yapay zeka kapalıyken de anlar. Odaya `/warp xanaxgod` yazarsa bot oyunda o komutu
