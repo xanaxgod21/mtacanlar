@@ -8,6 +8,12 @@
 //   !odun   -> yakındaki ağaçları keser
 //   !tas    -> taş kırar (kazma gerekir)
 //   !maden  -> cevher kazar: kömür, demir, bakır, altın, elmas... (kazma gerekir)
+//   !maden elmas|demir|altin... -> o cevherin derinliğine merdivenle iner, orada kazar
+//   !balik  -> yakındaki suda balık tutar (olta yoksa ipten yapar)
+//   !xp     -> durduğu yerde yaklaşan yaratıkları keser (yaratık çiftliği)
+//   !koru   -> sahibini takip eder, ona saldıranla savaşır (!koruma ac|kapat: kendini koruma)
+//   !yap kazma|balta|kilic|kurek|capa|olta -> en değerli malzemeden yapar (ham demiri eritir)
+//   !envanter -> üstündekileri söyler
 //   !topla  -> yerdeki eşyaları toplar
 //   !bosalt -> topladıklarını sandığa bırakır (sandık gösterilmediyse en yakındakine)
 //   !sandik ekle|sil|liste|temizle -> sandık göster (dibinde dur ya da x y z yaz)
@@ -19,7 +25,9 @@
 //
 // Kendiliğinden yaptıkları: sunucu şifre isterse /login - /register yazar
 // (şifre Discord'dan /giris ile verilir), acıkınca yemek yer, boştayken AFK
-// diye atılmasın diye arada hareket eder, oyun sohbetini müşterinin odasına aktarır.
+// diye atılmasın diye arada hareket eder, oyun sohbetini müşterinin odasına aktarır,
+// yaklaşan düşman yaratıklarla savaşır (savas.js), aleti kırılınca yenisini yapar
+// (zanaat.js), ölünce doğup eşyalarını toplamaya döner ve işine devam eder.
 
 const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
@@ -28,6 +36,8 @@ const fs = require('fs')
 const path = require('path')
 const ayarlar = require('./ayarlar')
 const { guvenliBaglanti, baglantiHatasiMetni } = require('./ag')
+const kurSavas = require('./savas')
+const kurZanaat = require('./zanaat')
 
 let createBrain
 try {
@@ -76,7 +86,8 @@ const AI_MODEL = ayarlar.aiModel
 const AI_GUNLUK_LIMIT = parseInt(process.env.AI_GUNLUK_LIMIT || '0', 10) || 0 // 0 = sınırsız
 // -----------------------------
 
-const YARDIM = 'Komutlar: !odun !maden !tas !farm !topla !bosalt !sandik !gel !dur !durum !otonom (ya da "Yaren odun kes" gibi konuş)'
+const YARDIM =
+  'Komutlar: !odun !maden (!maden elmas) !tas !farm !balik !xp !koru !yap kazma !topla !bosalt !sandik !envanter !gel !dur !durum !otonom (ya da "Yaren odun kes" gibi konuş)'
 
 const botSecenek = {
   host: HOST,
@@ -124,10 +135,61 @@ let gorev = null        // çalışan görevin bilgisi: { id, bitis, not, zamanl
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const key = (p) => `${p.x},${p.y},${p.z}`
 
+// ---------- KENDİNİ KORUMA (savas.js) ----------
+// Düşman yaratık yaklaşınca savaşır, tehlikeliden kaçar. Savaş sürerken görevler
+// bekler: yürüme ve kazma aşağıda sarmalanır, savaş kestiyse bitince yeniden denenir.
+let KORUMA = process.env.MC_KORUMA !== '0'
+const savas = kurSavas(bot, {
+  goals,
+  log: (m) => console.log(m),
+  iyiSilah: () => iyiAlet('sword') || iyiAlet('axe'),
+  yemekYe: () => yemekGerekirse(),
+  istatistik: (tur, ad) => istatistikEkle(tur, ad),
+  acik: () => (KORUMA || currentTask === 'koru' || currentTask === 'xp') && hazir,
+  yerinde: () => currentTask === 'xp',
+  korunan: () => (currentTask === 'koru' ? sahipOyuncu()?.entity || null : null),
+})
+
+// ---------- ALET YAPMA (zanaat.js) ----------
+const zanaat = kurZanaat(bot, {
+  goals,
+  log: (m) => console.log(m),
+  kaz: (b) => kaz(b),
+  topla: () => collectDrops(taskId, 5, 6),
+  aletTuru: (i) => aletTuru(i),
+  istatistik: (tur, ad) => istatistikEkle(tur, ad),
+})
+
+// Yürüme savaşta kesilirse savaş bitince aynı hedefe yeniden gider (görev değişmediyse)
+function savasaDayanikli() {
+  const asilGoto = bot.pathfinder.goto.bind(bot.pathfinder)
+  bot.pathfinder.goto = async (goal) => {
+    const tid = taskId
+    for (;;) {
+      await savas.bekle()
+      if (taskId !== tid) throw new Error('görev değişti')
+      const s = savas.seq()
+      try {
+        return await asilGoto(goal)
+      } catch (e) {
+        if (savas.seq() === s || !(bot.health > 0)) throw e
+      }
+    }
+  }
+}
+
+let ilkDogus = true
+bot.on('spawn', () => {
+  if (ilkDogus) return
+  // ölüp yeniden doğdu
+  if (olum) setTimeout(() => olumdenDon().catch((e) => console.log('[olum] hata:', e.message)), 2500)
+})
 bot.once('spawn', () => {
+  ilkDogus = false
   normalMovements = new Movements(bot)
   woodMovements = new Movements(bot)
   woodMovements.canDig = false // odun toplarken yaprakları kırmasın
+  savasaDayanikli()
   hazir = true
   restoreMovements()
   console.log(`[olay] Sunucuya girdi: ${HOST}:${PORT} (${BOT_NAME})`)
@@ -206,19 +268,21 @@ async function onOwnerMessage(username, message, _translate, satir) {
 // söylenir. Para harcamaz. İş isteği = iş adı + yapma fiili ("odun kes", "maden kaz").
 // "kesme", "kesmeyi bırak" gibi olumsuz biçimler durdurmadır; "kazma" alettir.
 const GOREV_NIYETLERI = [
+  ['!balik', /\bbalik/],
+  ['!xp', /\b(xp|tecrube|yaratik|mob|canavar)/],
   ['!odun', /\b(odun|agac|kutuk|tahta|kereste)/],
   ['!maden', /\b(maden|cevher|demir|komur|elmas|altin|bakir|zumrut|lapis|kizil ?tas|redstone)/],
   ['!tas', /\b(tas|kaya|cobble)/],
   ['!farm', /\b(tarla|farm|ekin|bugday|hasat|havuc|patates|pancar)/],
   ['!topla', /\b(topla(?![dt][iu][gk])|yerdeki)/], // "topladıklarını" değil
 ]
-const FIIL_RE = /\b(kes|kas|kaz|kir|topla|hasat|cikar|bic|getir|bul)(?!m[ae])/ // "kesme", "kazma(yı)" değil
+const FIIL_RE = /\b(kes|kas|kaz|kir|topla|hasat|cikar|bic|getir|bul|tut)(?!m[ae])/ // "kesme", "kazma(yı)" değil
 // her zaman durdurma: "kesmeyi bırak", "kazmayı kes", "odun kesme", "kazma artık"
 const KESIN_DUR_RE = /\w+m[ae]yi (birak|kes|durdur)|\b(kes|kas|kir|topla)m[ae]\b|\bkazma (artik|yeter)|\bkazma$/
 // iş isteğinden önce geçerse: "dur", "durur musun" ("odun kes, bitince dur" ise iş yapılır)
 const DUR_RE = /\b(dur|durun|durur|dursana|durdur\w*|bekle\w*|yeter|iptal|vazgec\w*)\b/
 const GEL_RE = /\b(gel(?!me)|yanima|buraya|beni takip)/
-const DURUM_RE = /\b(durum|ne yapiyorsun|neredesin|nasilsin|envanter|ne var)/
+const DURUM_RE = /\b(durum|ne yapiyorsun|neredesin|nasilsin|ne var)/
 const SANDIGA_RE = /\b(sandi[gk]|bosalt|depola|gotur)|\besya\w* (birak|koy)/
 const SANDIK_KOMUTLARI = [
   [/\bsandi(k|gi|gimi|klari)\s+(ekle|kaydet|goster)/, '!sandik ekle'], // "sandığa ekle" değil
@@ -226,11 +290,28 @@ const SANDIK_KOMUTLARI = [
   [/\bsandi(k|klari|klarimi)\s+temizle/, '!sandik temizle'],
   [/\bsandik(lar)?(in|im|larim)?\s+(liste|neler)|\bsandik listesi/, '!sandik liste'],
 ]
+// koruma, alet yapma, envanter: işlerden önce bakılır
+const ALET_KELIME = { kazma: 'kazma', balta: 'balta', kilic: 'kilic', kurek: 'kurek', capa: 'capa', olta: 'olta' }
+const OZEL_NIYETLER = [
+  [/\bkoruma\w* (kapat|kapa|iptal)|\bsavasma\b/, '!koruma kapat'],
+  [/\bkoruma\w* ac/, '!koruma ac'],
+  [/\b(beni koru|koru beni|korumam ol|bana koruma|beni savun)/, '!koru'],
+  // "envanterini boşalt", "envanter dolunca odun kes" değil
+  [/^(?!.*\b(bosalt|depola|sandi[gk]|koy|birak|gotur)|.*envanter\w* dol).*\b(envanter|uzerinde ne var|cantanda ne var|neyin var)/, '!envanter'],
+]
+const MADEN_KELIME = [
+  ['elmas', /\b(elmas|derin)/], ['kiziltas', /\b(kizil ?tas|redstone)/], ['altin', /\baltin/], ['zumrut', /\bzumrut/],
+  ['lapis', /\blapis/], ['demir', /\bdemir/], ['bakir', /\bbakir/], ['komur', /\bkomur/],
+]
 function niyetBul(t) {
   // "elmasları sandığa koyma": bırakma isteği değil
   if (/\b(koy|birak|gotur|tasi|bosalt|depola)m[ae]\b/.test(t)) return 'birakma'
   if (KESIN_DUR_RE.test(t)) return '!dur'
   for (const [re, cmd] of SANDIK_KOMUTLARI) if (re.test(t)) return cmd
+  for (const [re, cmd] of OZEL_NIYETLER) if (re.test(t)) return cmd
+  // "kazma yap", "bana kılıç yap", "olta üret"
+  const alet = t.match(/\b(kazma|balta|kilic|kurek|capa|olta)\w*\s+(yap|uret|olustur)|\b(yap|uret)\w*\s+(kazma|balta|kilic|kurek|capa|olta)/)
+  if (alet) return `!yap ${ALET_KELIME[alet[1] || alet[4]]}`
   if (/\bsandi[gk]\w*tan\b/.test(t)) return 'sandiktan' // "sandıktan al": yapamaz
   // "götürdün mü", "sandık nerede": soru, iş değil
   if (/\b(nerede|nerde)\b|\w+[dt][iu]n? m[iu]\b/.test(t)) return '!durum'
@@ -264,6 +345,11 @@ function niyetBul(t) {
   // "odun kes, sandığa götür": görev topladığını zaten sandığa götürür.
   // "odunları sandığa koy" (kesme yok): elindekileri bırakır.
   if (sandiga && !is) return '!bosalt'
+  if (gorev === '!maden') {
+    // "elmas kaz": o cevherin derinliğine iner
+    const hedef = MADEN_KELIME.find(([, re]) => re.test(metin))
+    return hedef ? `!maden ${hedef[0]}` : gorev
+  }
   if (gorev) return gorev
   if (/\b(yardim|komut|ne yapabilirsin|neler yapabilirsin)/.test(t)) return '!yardim'
   return null
@@ -281,7 +367,25 @@ function anahtarsizCevap(metin) {
 bot.on('chat', onOwnerMessage)
 bot.on('whisper', onOwnerMessage) // /msg GorevBot !odun da çalışsın
 
-const KOMUTLAR = ['!farm', '!odun', '!tas', '!maden', '!topla', '!bosalt', '!sandik', '!otonom', '!dur', '!durum', '!gel', '!yardim']
+const KOMUTLAR = [
+  '!farm', '!odun', '!tas', '!maden', '!topla', '!bosalt', '!sandik', '!otonom', '!dur', '!durum', '!gel', '!yardim',
+  '!koru', '!koruma', '!balik', '!xp', '!yap', '!envanter',
+]
+
+// ---------- PAKET ----------
+// Satıcı ucuz paket sattıysa (sadece odun, sadece maden...) diğer işler kapalıdır.
+// MC_PAKET: "tam" ya da "odun,maden" gibi. Gel, dur, koru, sandık, alet yapma her pakette var.
+const PAKET_GOREVLERI = { odun: ['odun'], maden: ['maden', 'tas'], farm: ['farm', 'balik', 'xp'] }
+const PAKET_ADLARI = { tam: 'Tam', odun: 'Odun', maden: 'Maden', farm: 'Farm (tarla, balık, XP)' }
+const PAKET = String(process.env.MC_PAKET || 'tam').split(',').map((p) => p.trim()).filter((p) => PAKET_ADLARI[p])
+const tamPaket = !PAKET.length || PAKET.includes('tam')
+const PAKETLI = new Set(Object.values(PAKET_GOREVLERI).flat())
+function paketEngeli(gorevAdi) {
+  if (tamPaket || !PAKETLI.has(gorevAdi)) return null
+  if (PAKET.some((p) => PAKET_GOREVLERI[p].includes(gorevAdi))) return null
+  return `Bu iş paketinde yok (paketin: ${PAKET.map((p) => PAKET_ADLARI[p]).join(' + ')}). Satıcıdan paket yükseltmesi isteyebilirsin.`
+}
+const ALET_ADLARI = { kazma: 'pickaxe', balta: 'axe', kilic: 'sword', kurek: 'shovel', capa: 'hoe', olta: 'fishing_rod' }
 
 // Komutu çalıştırır, cevabı oyunda söyler ve geri döndürür (Discord ve ses.py
 // cevabı HTTP'den alır). Bilinmeyen komutta null döner, hiçbir şey söylemez.
@@ -301,12 +405,40 @@ function komut(cmd) {
     case '!farm':
     case '!odun':
     case '!tas':
-    case '!maden':
     case '!topla':
-    case '!bosalt': {
+    case '!bosalt':
+    case '!balik':
+    case '!xp':
+    case '!koru': {
       const gorevAdi = ad.slice(1)
-      return baslamaEngeli(gorevAdi) || startTask(gorevAdi, GOREVLER[gorevAdi])
+      const engel = paketEngeli(gorevAdi) || baslamaEngeli(gorevAdi)
+      if (engel) return engel
+      const metin = startTask(gorevAdi, GOREVLER[gorevAdi], 0, ad)
+      if (gorevAdi === 'koru') return 'Yanındayım, sana saldıranla savaşırım. (Bırakmak için: dur)'
+      if (gorevAdi === 'xp') return `${metin} Burada durup yaklaşan yaratıkları keserim (yaratık çiftliği için).`
+      return metin
     }
+    case '!maden': {
+      const engel = paketEngeli('maden') || baslamaEngeli('maden')
+      if (engel) return engel
+      const hedef = MADEN_HEDEFLERI[arg[0]] ? arg[0] : null
+      const metin = startTask('maden', (id) => madenTask(id, { hedef }), 0, hedef ? `!maden ${hedef}` : '!maden')
+      return hedef && MADEN_HEDEFLERI[hedef].y.some((y) => y !== null) ? `${metin} ${hedef} için aşağı iniyorum.` : metin
+    }
+    case '!yap': {
+      const tur = ALET_ADLARI[arg[0] || 'kazma']
+      if (!tur) return 'Şunları yapabilirim: !yap kazma | balta | kilic | kurek | capa | olta'
+      return startTask('yap', (id) => yapTask(id, tur), 0, cmd)
+    }
+    case '!koruma': {
+      if (arg[0] === 'kapat') KORUMA = false
+      else if (arg[0] === 'ac') KORUMA = true
+      return KORUMA
+        ? 'Koruma açık: yaklaşan düşman yaratıklarla savaşır, tehlikeliden kaçarım. (Kapatmak: !koruma kapat)'
+        : 'Koruma kapalı: yaratıklarla savaşmam (beni koru dersen yine korurum). (Açmak: !koruma ac)'
+    }
+    case '!envanter':
+      return envanterOzeti()
     case '!sandik':
       return sandikKomutu(arg)
     case '!otonom':
@@ -358,11 +490,45 @@ function durumMetni() {
 // o olayın dinleyicilerini sildiği için sayımı kaz() içinde kendimiz yapıyoruz.
 const counters = {}
 
+// Savaş kazmayı keserse savaş bitince aynı bloğu yeniden kazar (görev değişmediyse)
 async function kaz(block) {
   const ad = block.name
-  await bot.dig(block)
+  const tid = taskId
+  for (;;) {
+    await savas.bekle()
+    if (taskId !== tid) throw new Error('görev değişti')
+    const b = bot.blockAt(block.position)
+    if (!b || b.boundingBox === 'empty' || b.name !== ad) return // bu arada kırılmış / değişmiş
+    const s = savas.seq()
+    try {
+      // sunucu cevap vermezse (blok uzakta, eklenti engelledi) sonsuza kadar beklemesin
+      const sure = (typeof bot.digTime === 'function' ? bot.digTime(b) : 5000) + 8000
+      await sureli(bot.dig(b), sure, 'kazma cevapsız kaldı')
+      break
+    } catch (e) {
+      if (/cevapsız/.test(e.message)) {
+        try {
+          bot.stopDigging()
+        } catch (_) {}
+      }
+      if (savas.seq() === s || !(bot.health > 0)) throw e
+    }
+  }
+  // Korumalı alanda (spawn, arsa) sunucu kırmayı geri alır: blok yerinde kalır.
+  // Kırıldı sayma, çağıran bu bloğu atlasın.
+  await sleep(150)
+  const sonra = bot.blockAt(block.position)
+  // çakıl/kum kırılınca üstündeki düşüp yerine geçer: o koruma sayılmaz
+  if (sonra && sonra.name === ad && sonra.boundingBox !== 'empty' && !/gravel|sand$|concrete_powder/.test(ad)) {
+    korumaliSayac++
+    if (korumaliSayac >= 3) uyar('korumali', 'Burada kazmama izin yok (korumalı alan / arsa olabilir). Beni başka bir yere götür.', 10 * 60000)
+    throw new Error('blok kırılmadı (korumalı alan olabilir)')
+  }
+  korumaliSayac = 0
   counters[ad] = (counters[ad] || 0) + 1
+  istatistikEkle('kirilan', ad)
 }
+let korumaliSayac = 0
 
 let lastResult = ''  // son görevin özeti
 let otonomRun = 0    // 0 = kapalı, değilse çalışan döngünün numarası
@@ -404,10 +570,13 @@ const GOREVLER = {
   maden: (id) => madenTask(id),
   topla: (id) => collectDrops(id, 16, 30),
   bosalt: (id) => bosaltTask(id),
+  koru: (id) => korumaTask(id),
+  balik: (id) => balikTask(id),
+  xp: (id) => xpTask(id),
 }
 // Topladığını sandığa götüren görevler (envanter dolunca, bir yığın toplayınca ve
 // görev kendiliğinden bitince)
-const TOPLAMA_GOREVLERI = new Set(['farm', 'odun', 'tas', 'maden'])
+const TOPLAMA_GOREVLERI = new Set(['farm', 'odun', 'tas', 'maden', 'balik', 'xp'])
 
 async function bosaltTask(id) {
   const hedef = birakmaHedefi()
@@ -427,25 +596,28 @@ const hasPickaxe = () => bot.inventory.items().some((i) => i.name.endsWith('_pic
 function baslamaEngeli(ad) {
   // gösterilen sandık varsa oradan kazma alabilir / oraya boşaltabilir
   const sandikVar = sandiklar().length > 0
-  if ((ad === 'tas' || ad === 'maden') && !hasPickaxe() && !sandikVar) {
+  if ((ad === 'tas' || ad === 'maden') && !hasPickaxe() && !sandikVar && !zanaat.yapilabilir('pickaxe')) {
     return `Kazmam yok, ${ad === 'tas' ? 'taş kıramam' : 'maden kazamam'}. Envanterime ya da sandığa bir kazma koy.`
   }
-  if (ad !== 'bosalt' && bot.inventory.emptySlotCount() === 0 && !sandikVar && !otoSandiklar(bot.entity.position).length) {
+  const toplar = ['farm', 'odun', 'tas', 'maden', 'topla', 'balik'].includes(ad)
+  if (toplar && bot.inventory.emptySlotCount() === 0 && !sandikVar && !otoSandiklar(bot.entity.position).length) {
     return 'Envanterim dolu ve yakında sandık yok. Boşaltmam için bir sandık göster: !sandik ekle'
   }
   return null
 }
 
 // Yapay zekanın başlattığı (istenirse süre sınırlı) görev
-function startTimed(ad, dakika, otonom) {
+function startTimed(ad, dakika, otonom, hedef) {
   if (!hazir) return 'Henüz oyuna girmedim.'
   if (!GOREVLER[ad]) return `Bilmediğim görev: ${ad}`
-  const engel = baslamaEngeli(ad)
+  const engel = paketEngeli(ad) || baslamaEngeli(ad)
   if (engel) return engel
   if (!otonom) otonomRun = 0 // kullanıcı bir şey isteyince otonom biter
   let mins = Math.max(0, Math.round(Number(dakika) || 0))
   if (otonom) mins = Math.min(mins || 5, 8) // otonomda süresiz ya da çok uzun görev olmasın
-  const text = startTask(ad, GOREVLER[ad], mins)
+  const madenHedefi = ad === 'maden' && MADEN_HEDEFLERI[hedef] ? hedef : null
+  const fn = madenHedefi ? (id) => madenTask(id, { hedef: madenHedefi }) : GOREVLER[ad]
+  const text = startTask(ad, fn, mins, madenHedefi ? `!maden ${madenHedefi}` : `!${ad}`)
   say(text)
   return text
 }
@@ -503,7 +675,16 @@ const brain = createBrain({
   log: (...a) => console.log(...a),
   getState: snapshot,
   actions: {
-    start: (gorev, dakika, otonom) => startTimed(gorev, dakika, otonom),
+    start: (gorev, dakika, otonom, hedef) => startTimed(gorev, dakika, otonom, hedef),
+    yap: (alet) => {
+      if (!hazir) return 'Henüz oyuna girmedim.'
+      const tur = ALET_ADLARI[alet]
+      if (!tur) return 'Bilmediğim alet.'
+      otonomRun = 0
+      const text = startTask('yap', (id) => yapTask(id, tur), 0, `!yap ${alet}`)
+      say(text)
+      return text
+    },
     stop: () => {
       otonomRun = 0
       stopTask()
@@ -558,8 +739,17 @@ function onTaskEnd({ name, natural, hata, startedAt, before, not }) {
 //     POST /komut {"komut": "farm"}        -> sabit komut, cevap: {"cevap": "..."}
 //     POST /soyle {"metin": "odun lazım"}  -> yapay zekaya serbest cümle
 //     GET  /durum                          -> botun durumu (JSON)
+//     GET  /envanter, /istatistik          -> üstündekiler, bugünkü / dünkü sayılar
 async function istekIsle(tip, veri) {
   if (tip === 'durum') return { kod: 200, veri: snapshot() }
+  if (tip === 'envanter') {
+    if (!hazir || !bot.entity) return { kod: 409, veri: { hata: 'henüz oyuna girmedim' } }
+    return { kod: 200, veri: envanterBilgisi() }
+  }
+  if (tip === 'istatistik') {
+    gunKontrol()
+    return { kod: 200, veri: istatistik }
+  }
   if (tip === 'komut') {
     const cevap = handleCommand('!' + String(veri.komut || '').toLowerCase().trim())
     if (cevap === null) return { kod: 400, veri: { hata: 'bilinmeyen komut' } }
@@ -643,8 +833,8 @@ const server = http.createServer((req, res) => {
     res.writeHead(kod, { 'Content-Type': 'application/json; charset=utf-8' })
     res.end(JSON.stringify(veri))
   }
-  if (req.method === 'GET' && req.url === '/durum') {
-    return istekIsle('durum').then((s) => cevapVer(s.kod, s.veri))
+  if (req.method === 'GET' && ['/durum', '/envanter', '/istatistik'].includes(req.url)) {
+    return istekIsle(req.url.slice(1)).then((s) => cevapVer(s.kod, s.veri))
   }
   if (req.method !== 'POST' || (req.url !== '/komut' && req.url !== '/soyle')) {
     return cevapVer(404, { hata: 'yok' })
@@ -696,10 +886,11 @@ function gorevNotu(id, msg) {
   say(msg)
 }
 
-function startTask(name, fn, dakika = 0) {
+function startTask(name, fn, dakika = 0, komutMetni = null) {
   stopTask()
   const id = ++taskId
-  const g = { id, bitis: dakika > 0 ? Date.now() + dakika * 60000 : 0, not: '', zamanlayici: null }
+  // komut: ölüp doğunca aynı işe (aynı ayarla, ör. "!maden elmas") dönmek için
+  const g = { id, bitis: dakika > 0 ? Date.now() + dakika * 60000 : 0, not: '', zamanlayici: null, komut: komutMetni || '!' + name }
   gorev = g
   currentTask = name
   // topladıklarını sayabilmek ve en yakın sandığı bulabilmek için başlangıç
@@ -802,6 +993,9 @@ const sandiktaYok = new Map() // alet türü -> sandıklarda en son bulunamadı�
 // Aleti eline alır. Elindeki kırılmak üzereyse envanterdeki sağlamına geçer,
 // envanterde yoksa belirlenen sandıklardan alır. Hiç yoksa elle devam eder.
 // Döner: true = alet elde, false = elle (aletsiz)
+const ALET_YAPILIR = new Set(['pickaxe', 'axe'])
+const yapilamadi = new Map() // alet türü -> son yapılamadığı zaman (her blokta denemesin)
+
 async function equipTool(kind, { sandiktan = true } = {}) {
   await yemekGerekirse() // görevin arasında, aleti almadan önce
   const ad = ALET_ADI[kind] || kind
@@ -816,6 +1010,17 @@ async function equipTool(kind, { sandiktan = true } = {}) {
     await sandikZiyareti(taskId, { alet: kind })
     alet = iyiAlet(kind)
     if (!alet) sandiktaYok.set(kind, Date.now())
+  }
+  // hâlâ yoksa üstündeki en değerli malzemeden kendisi yapar (ham demiri eritip de)
+  if (!alet && sandiktan && ALET_YAPILIR.has(kind) && Date.now() - (yapilamadi.get(kind) || 0) > 5 * 60000) {
+    console.log(`[alet] sağlam ${ad} yok, kendim yapmayı deniyorum`)
+    const r = await zanaat.aletYap(kind)
+    alet = iyiAlet(kind)
+    if (r.ok && alet) say(`Kendime yeni ${ad} yaptım (${alet.name}).`)
+    else {
+      yapilamadi.set(kind, Date.now())
+      console.log(`[alet] ${ad} yapamadım: ${r.neden || 'bilinmiyor'}`)
+    }
   }
   if (!alet) {
     const hepsi = bot.inventory.items().filter((i) => aletTuru(i) === kind).sort(aletSirasi)
@@ -941,7 +1146,7 @@ function sandikKomutu([islem = 'liste', ...sayilar]) {
 }
 
 // Sandığa bırakılmayıp yanında kalanlar (işine lazım olanlar), türü başına adet
-const TOHUMLAR = new Set(['wheat_seeds', 'beetroot_seeds', 'carrot', 'potato'])
+const TOHUMLAR = new Set(['wheat_seeds', 'beetroot_seeds', 'carrot', 'potato', 'nether_wart'])
 function tutulacak(ad) {
   if (ad.endsWith('_sapling') || ad === 'mangrove_propagule') return 16 // yeniden dikmek için
   if (TOHUMLAR.has(ad)) return 32 // tarlayı yeniden ekmek için
@@ -997,6 +1202,7 @@ async function sandigaBirak(pencere, sinir = null) {
       if (p.slot != null) await slotTasi(pencere, p.slot, 0, pencere.inventoryStart)
       else await pencere.deposit(p.type, null, p.adet)
       birakilan += p.adet
+      istatistikEkle('birakilan', p.ad, p.adet)
     } catch (e) {
       if (/full|dolu/i.test(e.message)) return { birakilan, dolu: true }
       console.log(`[sandık] ${p.ad} bırakılamadı: ${e.message}`)
@@ -1118,6 +1324,7 @@ let teslimBekle = 0 // sandığa bırakamadıysa bir süre tekrar denemesin
 // En yakın (gösterilmemiş) sandığa sadece topladıklarını götürdüğü için orada yarı dolu
 // envanter sayılmaz: yarısı kendi eşyasıysa birkaç fidan için yürümesin.
 async function gerekirseBosalt(id) {
+  if (gorev && gorev.id === id && gorev.uzakTeslim) return // derin madende her yığında yukarı çıkmasın (dolunca / bitince götürür)
   const yariDolu = doluYuva() >= bosaltmaEsigi
   const yigin = toplananAdet() >= TESLIM_ADET && Date.now() >= teslimBekle
   if (!yariDolu && !yigin) return
@@ -1270,13 +1477,15 @@ async function gatherTask(id, { matchFn, toolKind, aletYok, label, maxCount = 20
     if (dolu) return gorevNotu(id, dolu)
     await gerekirseBosalt(id)
 
+    const ayak = bot.entity.position.floored()
     const positions = bot
       .findBlocks({
         matching: matchFn,
         maxDistance: SEARCH_RADIUS,
         count: 20,
       })
-      .filter((p) => !skipped.has(key(p)))
+      // tam ayağının altındakini kazmaz: altı boşluk / mağara olabilir, düşer
+      .filter((p) => !skipped.has(key(p)) && !(p.x === ayak.x && p.z === ayak.z && p.y < ayak.y))
 
     if (positions.length === 0) {
       gorevNotu(id, `Yakında ${label} kalmadı.`)
@@ -1493,20 +1702,25 @@ function findVisibleLog(skipped, structures) {
   return null
 }
 
-// Takılırsa vazgeçsin diye süreli yürüme
+// Takılırsa vazgeçsin diye süreli yürüme (savaşta geçen süre sayılmaz)
 function gotoTimeout(goal, ms) {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => {
+    let gecen = 0
+    const t = setInterval(() => {
+      if (savas.savasta()) return
+      gecen += 250
+      if (gecen < ms) return
+      clearInterval(t)
       bot.pathfinder.setGoal(null)
       reject(new Error('zaman aşımı'))
-    }, ms)
+    }, 250)
     bot.pathfinder.goto(goal).then(
       () => {
-        clearTimeout(t)
+        clearInterval(t)
         resolve()
       },
       (e) => {
-        clearTimeout(t)
+        clearInterval(t)
         reject(e)
       }
     )
@@ -1855,7 +2069,7 @@ function kazmaYeter(b) {
   return !!kazma && !!b.harvestTools[kazma.type]
 }
 
-function cevherBul(skipped) {
+function cevherBul(skipped, enFazla = null) {
   if (!cevherIdleri) {
     cevherIdleri = Object.values(bot.registry.blocksByName).filter((b) => cevherMi(b)).map((b) => b.id)
   }
@@ -1865,6 +2079,7 @@ function cevherBul(skipped) {
   const adaylar = []
   for (const p of bot.findBlocks({ matching: cevherIdleri, maxDistance: SEARCH_RADIUS, count: 64 })) {
     if (skipped.has(key(p)) || Math.abs(p.y - ayak.y) > MADEN_DIKEY) continue
+    if (enFazla !== null && p.distanceTo(ben) > enFazla) continue // inerken sadece yanındakiler
     if (p.x === ayak.x && p.z === ayak.z && p.y < ayak.y) continue // tam ayağının altı: düşer
     const b = bot.blockAt(p)
     if (!b || lavYakin(p)) continue
@@ -1878,6 +2093,22 @@ function cevherBul(skipped) {
   return { pos: adaylar[0]?.p || null, yetmeyen }
 }
 
+// Önündeki blokları güvenliyse kazar: lav/su/boşluk ya da kazmadığı blok varsa 'kapali'
+const kazilabilirMi = (b) => b.boundingBox === 'empty' || MADEN_TASI.has(b.name) || (cevherMi(b) && kazmaYeter(b))
+const tehlikeli = (b) => !b || b.name === 'lava' || b.name === 'water' || lavYakin(b.position)
+async function yolAc(id, bloklar) {
+  for (const b of bloklar) {
+    if (b.boundingBox === 'empty') continue
+    if (!(await equipTool('pickaxe'))) return 'kazma'
+    if (id !== taskId) return 'ok'
+    const guncel = bot.blockAt(b.position) // üstten çakıl düşmüş olabilir
+    if (!guncel || guncel.boundingBox === 'empty') continue
+    if (!kazmaYeter(guncel) || (!MADEN_TASI.has(guncel.name) && !cevherMi(guncel))) return 'kapali'
+    await kaz(guncel)
+  }
+  return null
+}
+
 // Cevher yokken: bakılan yöne bir adım tünel (ayak + baş hizası). Önü kapalıysa
 // (lav, su, boşluk, yapı) başka yöne döner. Döner: 'ok' | 'kazma' | 'kapali'
 async function tunelAdimi(id) {
@@ -1887,37 +2118,86 @@ async function tunelAdimi(id) {
     const ileri = ayak.plus(YATAY[tunelYonu])
     const zemin = bot.blockAt(ileri.offset(0, -1, 0))
     const bloklar = [bot.blockAt(ileri), bot.blockAt(ileri.offset(0, 1, 0))]
-    const kapali =
-      !zemin ||
-      zemin.boundingBox !== 'block' ||
-      bloklar.some((b) => !b || b.name === 'lava' || b.name === 'water' || lavYakin(b.position)) ||
-      bloklar.some((b) => b.boundingBox !== 'empty' && !MADEN_TASI.has(b.name) && !(cevherMi(b) && kazmaYeter(b)))
+    const kapali = !zemin || zemin.boundingBox !== 'block' || bloklar.some(tehlikeli) || !bloklar.every(kazilabilirMi)
     if (kapali) {
       tunelYonu = (tunelYonu + 1) % 4
       continue
     }
-    for (const b of bloklar) {
-      if (b.boundingBox === 'empty') continue
-      if (!(await equipTool('pickaxe'))) return 'kazma'
-      if (id !== taskId) return 'ok'
-      const guncel = bot.blockAt(b.position) // üstten çakıl düşmüş olabilir
-      if (!guncel || guncel.boundingBox === 'empty') continue
-      if (!kazmaYeter(guncel) || (!MADEN_TASI.has(guncel.name) && !cevherMi(guncel))) return 'kapali'
-      await kaz(guncel)
-    }
+    const r = await yolAc(id, bloklar)
+    if (r) return r
     await gotoTimeout(new goals.GoalBlock(ileri.x, ileri.y, ileri.z), 15000)
     return 'ok'
   }
   return 'kapali'
 }
 
-async function madenTask(id) {
+// Derin maden: bakılan yöne bir basamak aşağı (merdiven). Önündeki 3 blok kazılır,
+// basamağın altı sağlam olmalı (boşluğa, lava, suya inmez). Döner: 'ok' | 'kazma' | 'kapali'
+async function inisAdimi(id) {
+  for (let deneme = 0; deneme < 4; deneme++) {
+    if (id !== taskId) return 'ok'
+    const ayak = bot.entity.position.floored()
+    const ileri = ayak.plus(YATAY[tunelYonu])
+    const bloklar = [ileri.offset(0, 1, 0), ileri, ileri.offset(0, -1, 0)].map((p) => bot.blockAt(p))
+    const zemin = bot.blockAt(ileri.offset(0, -2, 0))
+    const kapali =
+      !zemin || zemin.boundingBox !== 'block' || tehlikeli(zemin) || bloklar.some(tehlikeli) || !bloklar.every(kazilabilirMi)
+    if (kapali) {
+      tunelYonu = (tunelYonu + 1) % 4
+      continue
+    }
+    const r = await yolAc(id, bloklar)
+    if (r) return r
+    await gotoTimeout(new goals.GoalBlock(ileri.x, ileri.y - 1, ileri.z), 15000)
+    return 'ok'
+  }
+  return 'kapali'
+}
+
+// "elmas kaz" gibi: hangi derinlikte aranır. [1.18+ dünyalar (-64'ten başlar), eski dünyalar]
+const MADEN_HEDEFLERI = {
+  elmas: { y: [-54, 12], demirLazim: true },
+  kiziltas: { y: [-54, 12], demirLazim: true },
+  altin: { y: [-16, 20], demirLazim: true },
+  zumrut: { y: [null, null], demirLazim: true },
+  lapis: { y: [0, 16] },
+  demir: { y: [16, 30] },
+  bakir: { y: [48, null] },
+  komur: { y: [null, null] },
+}
+const KATMAN = ['netherite', 'diamond', 'iron', 'stone', 'golden', 'wooden']
+const kazmaKatmani = () => {
+  const k = iyiAlet('pickaxe') || bot.inventory.items().find((i) => aletTuru(i) === 'pickaxe')
+  return k ? KATMAN.findIndex((m) => k.name.startsWith(m + '_')) : 99
+}
+
+async function demirKazmaYap() {
+  console.log('[maden] Demir kazma yapacak malzemem var, yapıyorum.')
+  const r = await zanaat.aletYap('pickaxe', { sadece: 'iron' })
+  if (r.ok) say('Kendime demir kazma yaptım.')
+  return r.ok
+}
+
+async function madenTask(id, secenek = {}) {
   if (!(await equipTool('pickaxe'))) return gorevNotu(id, 'Kazmam yok! Envanterime bir kazma ver.')
+  const hedefBilgi = MADEN_HEDEFLERI[secenek.hedef] || null
+  const yeniDunya = (bot.game?.minY ?? 0) < 0
+  const hedefY = hedefBilgi ? hedefBilgi.y[yeniDunya ? 0 : 1] : null
+  let iniyor = hedefY !== null && bot.entity.position.y > hedefY + 1
+  if (gorev && gorev.id === id && iniyor) gorev.uzakTeslim = true // derinden her yığında yukarı çıkmasın
+  if (hedefBilgi?.demirLazim && kazmaKatmani() > KATMAN.indexOf('iron')) {
+    if (zanaat.yukseltilebilir('pickaxe')) await demirKazmaYap()
+    else say(`${secenek.hedef} için en az demir kazma lazım. Yolda demir bulursam eritip kendime yaparım.`)
+  }
+  if (iniyor) console.log(`[maden] ${secenek.hedef} için y=${hedefY} seviyesine merdivenle iniyorum (şu an y=${Math.floor(bot.entity.position.y)}).`)
   const skipped = new Set()
   tunelYonu = Math.floor(Math.random() * 4)
   let count = 0
   let tunel = 0 // son cevherden beri tünelde atılan adım
   let hatalar = 0
+  let sonYukseltme = Date.now()
+  let sonInisY = null
+  const tunelSiniri = hedefY !== null ? TUNEL_SINIRI * 3 : TUNEL_SINIRI
   while (calisiyor(id)) {
     let hedef = null
     try {
@@ -1925,12 +2205,34 @@ async function madenTask(id) {
       if (dolu) return gorevNotu(id, dolu)
       await gerekirseBosalt(id)
       if (!calisiyor(id)) break
+      // ham demiri biriktiyse kazmasını demire yükselt (elmasa dokunmaz)
+      if (Date.now() - sonYukseltme > 20000) {
+        sonYukseltme = Date.now()
+        if (kazmaKatmani() > KATMAN.indexOf('iron') && zanaat.yukseltilebilir('pickaxe')) await demirKazmaYap()
+      }
 
-      const { pos, yetmeyen } = cevherBul(skipped)
+      const { pos, yetmeyen } = cevherBul(skipped, iniyor ? 5 : null)
       hedef = pos
       if (yetmeyen) uyar('kazma-yetmez', 'Yakında kazmamın yetmediği cevherler var (elmas, altın için en az demir kazma lazım).', 30 * 60000)
+      if (!pos && iniyor) {
+        if (bot.entity.position.y <= hedefY + 1) {
+          iniyor = false
+          console.log(`[maden] y=${Math.floor(bot.entity.position.y)} seviyesine indim, ${secenek.hedef} arıyorum.`)
+          continue
+        }
+        const r = await inisAdimi(id)
+        const y = Math.floor(bot.entity.position.y)
+        if (y % 10 === 0 && y !== sonInisY) console.log(`[maden] İniyorum: y=${(sonInisY = y)}`)
+        if (r === 'kazma') return gorevNotu(id, 'Kazmam kırıldı, bana yeni bir kazma ver.')
+        if (r === 'kapali') {
+          iniyor = false
+          console.log(`[maden] Daha aşağı inemiyorum (önüm lav, su ya da boşluk), y=${Math.floor(bot.entity.position.y)} seviyesinde arıyorum.`)
+        }
+        hatalar = 0
+        continue
+      }
       if (!pos) {
-        if (tunel >= TUNEL_SINIRI) return gorevNotu(id, 'Yakında maden kalmadı. Beni bir mağaraya ya da madene götür.')
+        if (tunel >= tunelSiniri) return gorevNotu(id, 'Yakında maden kalmadı. Beni bir mağaraya ya da madene götür.')
         if (tunel === 0) console.log('[maden] Görünen cevher yok, tünel kazarak arıyorum.')
         const r = await tunelAdimi(id)
         if (r === 'kazma') return gorevNotu(id, 'Kazmam kırıldı, bana yeni bir kazma ver.')
@@ -1976,6 +2278,247 @@ async function madenTask(id) {
   }
 }
 
+// ---------- BENİ KORU ----------
+// Sahibini takip eder; sahibine ya da kendisine saldıran yaratıklarla savaşır
+// (savaşı savas.js yapar, bu görev sadece sahibin yanında kalır).
+async function korumaTask(id) {
+  if (!OWNER) return gorevNotu(id, SAHIPSIZ)
+  let goremedi = 0
+  while (calisiyor(id)) {
+    if (savas.savasta()) {
+      await savas.bekle()
+      continue
+    }
+    const p = sahipOyuncu()?.entity
+    if (!p) {
+      if (goremedi++ % 30 === 0) say('Seni göremiyorum, yanıma gelince korurum.')
+      await sleep(2000)
+      continue
+    }
+    goremedi = 0
+    const g = bot.pathfinder.goal
+    if (!(g instanceof goals.GoalFollow) || g.entity !== p) bot.pathfinder.setGoal(new goals.GoalFollow(p, 2), true)
+    await yemekGerekirse()
+    await sleep(500)
+  }
+  if (id === taskId) bot.pathfinder.setGoal(null)
+}
+
+// ---------- XP (YARATIK ÇİFTLİĞİ) ----------
+// Başladığı yerde durur, yaklaşan yaratıkları keser (savas.js yerinde modunda),
+// düşenleri toplar ve yerine döner. Çiftlikteki domuz adam, enderman da kesilir.
+async function xpTask(id) {
+  const yer = bot.entity.position.floored()
+  if (!iyiAlet('sword') && !iyiAlet('axe')) say('Kılıcım yok, elle vuruyorum (yavaş). Bana kılıç ver.')
+  while (calisiyor(id)) {
+    await savas.bekle()
+    await yemekGerekirse()
+    const dolu = await yerAc(id)
+    if (dolu) return gorevNotu(id, dolu)
+    await gerekirseBosalt(id)
+    await collectDrops(id, 3, 6)
+    if (id !== taskId) return
+    if (bot.entity.position.distanceTo(yer.offset(0.5, 0, 0.5)) > 1.2) {
+      await gotoTimeout(new goals.GoalBlock(yer.x, yer.y, yer.z), 15000).catch(() => {})
+    }
+    await sleep(1000)
+  }
+}
+
+// ---------- BALIK ----------
+// Yakındaki suya olta atar, tuttuklarını sayar (sandığa da götürür). Oltası yoksa
+// ip ve çubuktan yapar.
+async function balikTask(id) {
+  const oltaBul = () => bot.inventory.items().find((i) => i.name === 'fishing_rod')
+  if (!oltaBul()) {
+    const r = await zanaat.aletYap('fishing_rod')
+    if (!oltaBul()) return gorevNotu(id, `Oltam yok${r.neden ? ` (${r.neden})` : ''}. Bana bir olta ver.`)
+  }
+  const suId = bot.registry.blocksByName.water?.id
+  const su = bot
+    .findBlocks({ matching: suId, maxDistance: 20, count: 80 })
+    .map((p) => bot.blockAt(p))
+    .filter((b) => b && bot.blockAt(b.position.offset(0, 1, 0))?.boundingBox === 'empty')
+    .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
+  if (!su) return gorevNotu(id, 'Yakında su göremiyorum. Beni suyun kenarına götür.')
+  if (su.position.distanceTo(bot.entity.position) > 6) {
+    await gotoTimeout(new goals.GoalNear(su.position.x, su.position.y + 1, su.position.z, 4), 30000).catch(() => {})
+  }
+  let tutulan = 0
+  let hata = 0
+  while (calisiyor(id)) {
+    const dolu = await yerAc(id)
+    if (dolu) return gorevNotu(id, dolu)
+    await gerekirseBosalt(id)
+    await yemekGerekirse()
+    await savas.bekle()
+    if (id !== taskId) return
+    const olta = oltaBul()
+    if (!olta) return gorevNotu(id, 'Oltam kırıldı. Bana yeni olta ver (ya da ip getir, yaparım).')
+    try {
+      if (bot.heldItem?.slot !== olta.slot) await bot.equip(olta, 'hand')
+      await bot.lookAt(su.position.offset(0.5, 1, 0.5), true)
+      const once = envanterSayim()
+      await sureli(bot.fish(), 45000, 'balık tutulamadı')
+      hata = 0
+      await sleep(600) // tutulan eşya envantere gelsin
+      for (const [ad, n] of envanterSayim()) {
+        const fark = n - (once.get(ad) || 0)
+        if (fark > 0) istatistikEkle('balik', ad, fark)
+      }
+      tutulan++
+      if (tutulan % 10 === 0) console.log(`[balik] ${tutulan} kez tuttum.`)
+    } catch (e) {
+      if (id !== taskId) return
+      try {
+        bot.activateItem() // oltayı geri çek
+      } catch (_) {}
+      if (savas.savasta()) continue
+      if (++hata >= 5) return gorevNotu(id, 'Balık tutamıyorum (olta suya düşmüyor olabilir). Beni suyun kenarına götür.')
+      await sleep(1500)
+    }
+  }
+}
+
+// ---------- ALET YAP (!yap kazma) ----------
+async function yapTask(id, tur) {
+  const r = await zanaat.aletYap(tur)
+  if (id !== taskId) return
+  gorevNotu(id, r.ok ? `Yaptım: ${r.ad}.` : `Yapamadım: ${r.neden}.`)
+}
+
+// ---------- ENVANTER ----------
+const ZIRH_YUVALARI = [5, 6, 7, 8] // kask, göğüs, pantolon, bot
+function envanterBilgisi() {
+  const esya = (it) =>
+    it && {
+      ad: it.name,
+      gorunen: it.displayName || it.name,
+      adet: it.count,
+      dayanik: it.maxDurability ? { kalan: kalanDayaniklilik(it), en: it.maxDurability } : null,
+    }
+  const items = bot.inventory.items()
+  return {
+    esyalar: items.map(esya),
+    el: esya(bot.heldItem),
+    zirh: ZIRH_YUVALARI.map((s) => esya(bot.inventory.slots[s])).filter(Boolean),
+    bos_slot: bot.inventory.emptySlotCount(),
+  }
+}
+function envanterOzeti() {
+  const say2 = envanterSayim()
+  if (!say2.size) return 'Envanterim boş.'
+  const liste = [...say2.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([ad, n]) => `${ad}×${n}`)
+  return `Envanterim: ${liste.join(', ')}${say2.size > 8 ? ` (+${say2.size - 8} çeşit)` : ''}. Boş slot ${bot.inventory.emptySlotCount()}.`
+}
+
+// ---------- GÜNLÜK İSTATİSTİK ----------
+// Bugün ne kırdı, sandığa ne bıraktı, kaç yaratık kesti, kaç kez öldü... Discord gün
+// sonunda odaya özet atar (/rapor ile istendiği an). Türkiye gününe göre sıfırlanır.
+const ISTATISTIK_DOSYA = path.join(VERI_DIR, 'istatistik.json')
+const trGun = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' })
+const bosIstatistik = (gun) => ({ gun, kirilan: {}, birakilan: {}, yaratik: {}, balik: {}, yapilan: {}, olum: 0 })
+let istatistik = { bugun: bosIstatistik(trGun()), dun: null }
+try {
+  const k = JSON.parse(fs.readFileSync(ISTATISTIK_DOSYA, 'utf-8'))
+  if (k && k.bugun && k.bugun.gun) istatistik = { bugun: k.bugun, dun: k.dun || null }
+} catch (_) {}
+let istatistikKirli = false
+function gunKontrol() {
+  const gun = trGun()
+  if (istatistik.bugun.gun === gun) return
+  istatistik = { bugun: bosIstatistik(gun), dun: istatistik.bugun }
+  istatistikKirli = true
+}
+function istatistikEkle(tur, ad, n = 1) {
+  gunKontrol()
+  const g = istatistik.bugun
+  if (tur === 'olum') g.olum = (g.olum || 0) + n
+  else {
+    g[tur] = g[tur] || {}
+    g[tur][ad] = (g[tur][ad] || 0) + n
+  }
+  istatistikKirli = true
+}
+function istatistikKaydet() {
+  if (!istatistikKirli) return
+  istatistikKirli = false
+  try {
+    fs.writeFileSync(ISTATISTIK_DOSYA, JSON.stringify(istatistik), 'utf-8')
+  } catch (_) {}
+}
+setInterval(istatistikKaydet, 30000).unref()
+process.on('exit', istatistikKaydet)
+
+// ---------- ÖLÜM ----------
+// Ölünce odaya haber verir ([olum] satırı: Discord sahibini etiketler). Doğunca ölüm
+// yerine dönüp eşyalarını toplar (yakınsa ve eşyalar kaybolmadan), sonra yaptığı işe
+// devam eder. Kısa sürede 3 kez ölürse işi bırakır.
+let olum = null // { pos, boyut, zaman, komut }
+const olumZamanlari = []
+let sonOlumMesaji = { metin: '', zaman: 0 }
+bot.on('messagestr', (m) => {
+  const t = String(m)
+  if (t.includes(BOT_NAME) && !t.trim().startsWith('<')) sonOlumMesaji = { metin: t.slice(0, 200), zaman: Date.now() }
+})
+
+function devamEt(komutMetni) {
+  setTimeout(() => {
+    if (currentTask || !hazir) return
+    console.log(`[olum] İşime dönüyorum: ${komutMetni}`)
+    handleCommand(komutMetni)
+  }, 1500)
+}
+
+async function esyaTopla(id, o) {
+  say('Öldüm, eşyalarımı toplamaya gidiyorum.')
+  const toplam = () => bot.inventory.items().reduce((t, i) => t + i.count, 0)
+  const once = toplam()
+  try {
+    await gotoTimeout(new goals.GoalNear(o.pos.x, o.pos.y, o.pos.z, 2), 120000)
+  } catch (e) {
+    if (id !== taskId) return
+    gorevNotu(id, 'Öldüğüm yere ulaşamadım, eşyalarımı alamadım.')
+    if (o.komut) devamEt(o.komut) // eşyalar gitse de işine devam etsin
+    return
+  }
+  for (let i = 0; i < 3 && id === taskId; i++) {
+    await collectDrops(id, 10, 40)
+    await sleep(500)
+  }
+  if (id !== taskId) return
+  const n = toplam() - once
+  gorevNotu(id, n > 0 ? `Eşyalarımı topladım (${n} eşya).` : 'Öldüğüm yerde eşya bulamadım (yanmış ya da kaybolmuş olabilir).')
+  if (o.komut) devamEt(o.komut)
+}
+
+async function olumdenDon() {
+  const o = olum
+  olum = null
+  if (!o || !hazir || !bot.entity) return
+  const son = olumZamanlari.filter((t) => Date.now() - t < 10 * 60000)
+  olumZamanlari.splice(0, olumZamanlari.length, ...son)
+  if (son.length >= 3) {
+    console.log('[olum] 10 dakikada 3 kez öldüm, işe devam etmiyorum. Beni güvenli bir yere götür.')
+    say('Kısa sürede çok öldüm, işi bıraktım. Beni güvenli bir yere götür.')
+    return
+  }
+  // sunucuda "keepInventory" açıksa eşyalar zaten üstünde
+  if (!bot.inventory.items().length) {
+    const uzak = (o.boyut && bot.game?.dimension && bot.game.dimension !== o.boyut) || bot.entity.position.distanceTo(o.pos) > 300
+    if (Date.now() - o.zaman > 4 * 60000) {
+      console.log('[olum] Eşyalarım çoktan kaybolmuştur, toplamaya gitmiyorum.')
+    } else if (uzak) {
+      console.log(`[olum] Öldüğüm yer çok uzak (${konumYaz(o.pos.floored())}), eşyalarımı alamıyorum.`)
+      say('Öldüğüm yer çok uzak, eşyalarımı alamıyorum.')
+    } else {
+      startTask('esya', (id) => esyaTopla(id, o), 0, o.komut) // burada da ölürse aynı işe dönsün
+      return
+    }
+  }
+  if (o.komut) devamEt(o.komut)
+}
+
 // ---------- ÇİFTÇİLİK ----------
 // ürün adı -> { olgun yaş, ekim eşyası }
 const CROPS = {
@@ -1983,6 +2526,20 @@ const CROPS = {
   carrots: { age: 7, seed: 'carrot' },
   potatoes: { age: 7, seed: 'potato' },
   beetroots: { age: 3, seed: 'beetroot_seeds' },
+  nether_wart: { age: 3, seed: 'nether_wart', toprak: 'soul_sand' },
+}
+// Ekilmeden toplananlar: şeker kamışı / bambu (en alttaki kök kalır, yeniden büyür),
+// kabak / karpuz (sadece sapı bağlı olan, yani tarladaki; süs kabağına dokunmaz)
+const UZAYAN = new Set(['sugar_cane', 'bamboo'])
+const MEYVE = { pumpkin: ['attached_pumpkin_stem', 'pumpkin_stem'], melon: ['attached_melon_stem', 'melon_stem'] }
+function hasatEdilir(b) {
+  if (!b) return false
+  if (CROPS[b.name]) return isRipe(b)
+  if (UZAYAN.has(b.name)) return bot.blockAt(b.position.offset(0, -1, 0))?.name === b.name
+  if (MEYVE[b.name]) {
+    return YATAY.some((d) => MEYVE[b.name].includes(bot.blockAt(b.position.plus(d))?.name))
+  }
+  return false
 }
 
 function isRipe(block) {
@@ -1997,7 +2554,7 @@ async function replant(pos, cropName) {
   const seed = bot.inventory.items().find((i) => i.name === seedName)
   if (!seed) return
   const farmland = bot.blockAt(pos.offset(0, -1, 0))
-  if (!farmland || farmland.name !== 'farmland') return
+  if (!farmland || farmland.name !== (CROPS[cropName].toprak || 'farmland')) return
   await bot.equip(seed, 'hand')
   try {
     await bot.placeBlock(farmland, new Vec3(0, 1, 0))
@@ -2006,7 +2563,7 @@ async function replant(pos, cropName) {
 
 async function farmTask(id) {
   const skipped = new Set()
-  const cropIds = Object.keys(CROPS)
+  const cropIds = [...Object.keys(CROPS), ...UZAYAN, ...Object.keys(MEYVE)]
     .map((n) => bot.registry.blocksByName[n])
     .filter(Boolean) // eski sürümlerde bazı ekinler yok
     .map((b) => b.id)
@@ -2017,13 +2574,11 @@ async function farmTask(id) {
     await gerekirseBosalt(id)
     await yemekGerekirse() // farm süresiz ve alet almıyor: yemeği burada yer
 
+    // önce türüne göre hızlı ara, sonra olgun mu / toplanır mı bak
     const positions = bot
-      .findBlocks({
-        matching: (b) => cropIds.includes(b.type) && isRipe(b),
-        maxDistance: SEARCH_RADIUS,
-        count: 30,
-      })
-      .filter((p) => !skipped.has(key(p)))
+      .findBlocks({ matching: cropIds, maxDistance: SEARCH_RADIUS, count: 300 })
+      .filter((p) => !skipped.has(key(p)) && hasatEdilir(bot.blockAt(p)))
+      .slice(0, 30)
 
     if (positions.length === 0) {
       afkKipirda() // ürün beklerken AFK diye atılmasın
@@ -2042,10 +2597,11 @@ async function farmTask(id) {
       try {
         await bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, 2))
         const block = bot.blockAt(pos)
-        if (!block || !isRipe(block)) continue
+        if (!hasatEdilir(block)) continue
         const cropName = block.name
+        if (MEYVE[cropName]) await equipTool('axe', { sandiktan: false }) // kabak/karpuz baltayla hızlı
         await kaz(block)
-        await replant(pos, cropName)
+        if (CROPS[cropName]) await replant(pos, cropName)
         bot._hasat = (bot._hasat || 0) + 1
         if (bot._hasat % 10 === 0) console.log(`[farm] ${bot._hasat} ürün hasat edildi (son: ${cropName})`)
       } catch (_) {
@@ -2232,9 +2788,28 @@ setInterval(() => {
 }, 10000).unref()
 
 let sifreReddedildi = false
+// Atılma nedeni JSON sohbet metni olarak gelir: okunur hâle getir
+function sohbetMetni(r) {
+  let v = r
+  if (typeof v === 'string') {
+    try {
+      v = JSON.parse(v)
+    } catch (_) {
+      return v
+    }
+  }
+  const parca = (x) =>
+    typeof x === 'string'
+      ? x
+      : !x || typeof x !== 'object'
+        ? ''
+        : (x.text || x.translate || '') + (Array.isArray(x.extra) ? x.extra.map(parca).join('') : '') +
+          (Array.isArray(x.with) ? ' ' + x.with.map(parca).join(' ') : '')
+  return parca(v).replace(/§./g, '').trim() || JSON.stringify(r)
+}
 bot.on('kicked', (r) => {
   const metin = JSON.stringify(r)
-  console.log('[olay] Sunucudan atıldı:', gizle(metin).slice(0, 300))
+  console.log('[olay] Sunucudan atıldı:', gizle(sohbetMetni(r)).slice(0, 300))
   // AuthMe varsayılanı: yanlış şifrede mesaj değil atma gelir. Aynı yanlış şifreyle
   // tekrar tekrar bağlanmasın (sunucu banlayabilir).
   if (GIRIS_SIFRE && girisDeneme > 0 && !girisYapildi && HATALI_RE.test(sade(metin))) {
@@ -2251,10 +2826,35 @@ bot.on('error', (e) => {
   // Daha bağlanmadan (ör. Microsoft girişi başarısız) hata olursa 'end' gelmez
   if (!hazir && !bot._client?.socket) process.exit(1)
 })
+// Bazı sunucular (ör. Cuberite) yeniden doğunca can paketini doğma paketinden önce
+// yollar: mineflayer botu ölü sanıp konum göndermeyi bırakır ve sonraki ölümü
+// kaçırır. Doğduktan sonra canı varsa canlı say; ölümü candan da yakala.
+let oluKayitli = false
+bot.on('respawn', () => {
+  setTimeout(() => {
+    if (bot.isAlive === false && bot.health > 0) bot.isAlive = true
+  }, 1500)
+})
+bot.on('health', () => {
+  if (bot.health > 0) oluKayitli = false
+  else if (!bot.isAlive && !oluKayitli && hazir) bot.emit('death') // mineflayer bu ölümü yaymayacak
+})
 bot.on('death', () => {
+  if (oluKayitli) return
+  oluKayitli = true
   console.log('[olay] Bot öldü')
   const p = bot.entity ? bot.entity.position : null
   const yer = p ? `konum ${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)}` : ''
+  // doğunca eşyaları toplamaya dönmek ve işe devam etmek için
+  const komutu = currentTask && gorev ? gorev.komut : null
+  olum = p ? { pos: p.clone(), boyut: bot.game?.dimension, zaman: Date.now(), komut: komutu } : null
+  olumZamanlari.push(Date.now())
+  istatistikEkle('olum')
+  const olumYeri = p ? p.floored() : null // p canlı nesne: doğunca yeni yere döner
+  setTimeout(() => {
+    const neden = Date.now() - sonOlumMesaji.zaman < 5000 ? sonOlumMesaji.metin : ''
+    console.log(`[olum] Öldüm${olumYeri ? ` (${konumYaz(olumYeri)})` : ''}${neden ? `: ${neden}` : ''}. Doğunca eşyalarımı toplamaya gideceğim.`)
+  }, 800)
   if (currentTask && gorev) {
     // Görevi bitir: doğunca eski yerine geri yürümeye çalışmasın. Ölüm,
     // görevin sonucu olarak deneyim defterine yazılır ve ders çıkarılır.

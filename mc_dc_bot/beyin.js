@@ -23,17 +23,32 @@ const TOOLS = [
   {
     name: 'gorev_baslat',
     description:
-      'Bir görev başlatır. farm: olgun ekinleri toplar ve yeniden eker. odun: ağacı baltayla keser, yapraklarını elle kırar, fidan diker (ev gibi yapılara dokunmaz). tas: doğal taş kırar, cobblestone yapılara dokunmaz (kazma gerekir). maden: cevher kazar (kömür, demir, bakır, altın, elmas...), görünen cevher yoksa tünel açarak arar (kazma gerekir). bosalt: topladıklarını sandığa bırakır. Görevler topladığını kendiliğinden sandığa götürür (bir yığın toplayınca, envanter dolunca ve görev bitince): sahip sandık gösterdiyse oraya, göstermediyse görevin başladığı yere en yakın sandığa. Alet kırılmak üzereyse gösterilen sandıktan yenisi alınır. Çalışan görev varsa onu bırakıp yenisine geçer.',
+      'Bir görev başlatır. farm: olgun ekinleri toplar ve yeniden eker. odun: ağacı baltayla keser, yapraklarını elle kırar, fidan diker (ev gibi yapılara dokunmaz). tas: doğal taş kırar, cobblestone yapılara dokunmaz (kazma gerekir). maden: cevher kazar (kömür, demir, bakır, altın, elmas...), görünen cevher yoksa tünel açarak arar (kazma gerekir); hedef verilirse o derinliğe iner. balik: yakındaki suda balık tutar. xp: durduğu yerde yaklaşan yaratıkları keser (yaratık çiftliği). koru: sahibini takip edip ona saldıranla savaşır. bosalt: topladıklarını sandığa bırakır. Görevler topladığını kendiliğinden sandığa götürür (bir yığın toplayınca, envanter dolunca ve görev bitince): sahip sandık gösterdiyse oraya, göstermediyse görevin başladığı yere en yakın sandığa. Alet kırılmak üzereyse gösterilen sandıktan yenisi alınır. Çalışan görev varsa onu bırakıp yenisine geçer.',
     input_schema: {
       type: 'object',
       properties: {
-        gorev: { type: 'string', enum: ['farm', 'odun', 'tas', 'maden', 'bosalt'] },
+        gorev: { type: 'string', enum: ['farm', 'odun', 'tas', 'maden', 'balik', 'xp', 'koru', 'bosalt'] },
+        hedef: {
+          type: 'string',
+          enum: ['elmas', 'demir', 'altin', 'kiziltas', 'lapis', 'bakir', 'komur', 'zumrut'],
+          description: 'Sadece maden için: o cevherin derinliğine merdivenle iner (elmas en derin). Boşsa olduğu yerde kazar.',
+        },
         dakika: {
           type: 'integer',
           description: 'Kaç dakika çalışsın. Boşsa durdurulana kadar. Otonom modda en fazla 8.',
         },
       },
       required: ['gorev'],
+    },
+  },
+  {
+    name: 'alet_yap',
+    description:
+      'Alet yapar: üstündeki en değerli malzemeden (elmas > demir > taş > tahta); ham demir varsa fırında eritir. Kazma/balta kırılınca bunu kendisi de yapar.',
+    input_schema: {
+      type: 'object',
+      properties: { alet: { type: 'string', enum: ['kazma', 'balta', 'kilic', 'kurek', 'capa', 'olta'] } },
+      required: ['alet'],
     },
   },
   {
@@ -249,7 +264,9 @@ ${dersler}`
     }
     switch (name) {
       case 'gorev_baslat':
-        return actions.start(input.gorev, input.dakika, ctx.otonom)
+        return actions.start(input.gorev, input.dakika, ctx.otonom, input.hedef)
+      case 'alet_yap':
+        return actions.yap ? actions.yap(input.alet) : 'Alet yapamıyorum.'
       case 'gorev_durdur':
         return actions.stop()
       case 'yanima_gel':
