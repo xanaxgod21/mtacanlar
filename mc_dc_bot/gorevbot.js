@@ -2348,6 +2348,44 @@ async function xpTask(id) {
 // ---------- BALIK ----------
 // Yakındaki suya olta atar, tuttuklarını sayar (sandığa da götürür). Oltası yoksa
 // ip ve çubuktan yapar.
+// Olta atar, balık vurunca çeker. mineflayer sadece vanilla'nın balık parçacığına
+// bakar; bazı sunucular (ör. Cuberite) vurunca sadece "bobber splash" sesi çalar.
+// Ses gelir de parçacık gelmezse (300 ms) oltayı kendimiz çekeriz.
+function balikBekle(ms) {
+  return new Promise((resolve, reject) => {
+    let bitti = false
+    let sesZamanlayici = null
+    const son = (hata) => {
+      if (bitti) return
+      bitti = true
+      clearTimeout(t)
+      clearTimeout(sesZamanlayici)
+      bot.removeListener('soundEffectHeard', ses)
+      hata ? reject(hata) : resolve()
+    }
+    const ses = (ad, nokta) => {
+      if (!/bobber.*splash/.test(String(ad)) || sesZamanlayici) return
+      const bizim = Object.values(bot.entities).find(
+        (e) => e.name === 'fishing_bobber' && e.position.distanceTo(nokta) < 2 && e.position.distanceTo(bot.entity.position) < 30
+      )
+      if (!bizim) return
+      sesZamanlayici = setTimeout(async () => {
+        if (bitti) return
+        bot.activateItem() // oltayı çek
+        // mineflayer eski şamandırayı bıraksın, yoksa sonraki atışı yanlışlıkla iptal eder
+        for (let i = 0; i < 15 && bot.entities[bizim.id] === bizim; i++) await sleep(100)
+        son()
+      }, 300)
+    }
+    bot.on('soundEffectHeard', ses)
+    const t = setTimeout(() => son(new Error('balık tutulamadı')), ms)
+    bot.fish().then(
+      () => son(),
+      (e) => son(e)
+    )
+  })
+}
+
 async function balikTask(id) {
   const oltaBul = () => bot.inventory.items().find((i) => i.name === 'fishing_rod')
   if (!oltaBul()) {
@@ -2379,7 +2417,7 @@ async function balikTask(id) {
       if (bot.heldItem?.slot !== olta.slot) await bot.equip(olta, 'hand')
       await bot.lookAt(su.position.offset(0.5, 1, 0.5), true)
       const once = envanterSayim()
-      await sureli(bot.fish(), 45000, 'balık tutulamadı')
+      await balikBekle(45000)
       hata = 0
       await sleep(600) // tutulan eşya envantere gelsin
       for (const [ad, n] of envanterSayim()) {
