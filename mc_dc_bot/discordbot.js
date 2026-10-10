@@ -56,7 +56,7 @@ const {
   EmbedBuilder,
 } = require('discord.js')
 const ayarlar = require('./ayarlar')
-const { LisansDeposu, bitisYazi, sureYazi, keySuresi, GUN, SAAT } = require('./lisans')
+const { LisansDeposu, bitisYazi, sureYazi, keySuresi, keyPaketi, keyBotSayisi, paketYazi, MAX_BOT, GUN, SAAT } = require('./lisans')
 const { BotYonetici, hedefKontrol, sunucuyaUlasilir, baglantiHatasiMetni } = require('./botyonetici')
 
 // ---------- AYARLAR ----------
@@ -192,79 +192,176 @@ setInterval(() => {
   for (const [kanalId, k] of kuyruklar) kanalaGonder(kanalId, k)
 }, 2000)
 
+// ---------- BİRDEN ÇOK BOT ----------
+// Bir lisansla 1-3 bot (pakete göre). 1. botun kimliği müşterinin Discord ID'si,
+// diğerleri "ID~2", "ID~3". 1. botun ayarları lisansın kendisinde (son,
+// calisiyordu), diğerlerininki l.botlar[n] içinde.
+const botKimligi = BotYonetici.kimlik
+const botuCoz = BotYonetici.coz
+const botKaydi = (l, n) => (n > 1 ? l?.botlar?.[n] || {} : l || {})
+function botGuncelle(uid, n, degisiklik) {
+  if (n <= 1) return depo.guncelle(uid, degisiklik)
+  const l = depo.bul(uid)
+  if (!l) return null
+  return depo.guncelle(uid, { botlar: { ...(l.botlar || {}), [n]: { ...(l.botlar?.[n] || {}), ...degisiklik } } })
+}
+// birden çok bot hakkı varsa loglar ve cevaplar hangi botun olduğunu söyler
+const botEtiketi = (l, n) => (n > 1 || depo.botSayisi(l) > 1 ? `[Bot ${n}] ` : '')
+
 // Oyun botlarının logları müşterinin odasına; "[satıcı]" satırları (tam hata
 // dökümü, API faturası) sadece satıcının log kanalına
-yonetici.on('log', (userId, line) => log(depo.bul(userId)?.kanalId, line))
-yonetici.on('saticiLog', (userId, line) => adminLog(`(${depo.bul(userId)?.kullaniciAdi || userId}) ${line}`))
+yonetici.on('log', (botId, line) => {
+  const { uid, n } = botuCoz(botId)
+  const l = depo.bul(uid)
+  if (!l) return
+  log(l.kanalId, botEtiketi(l, n) + line)
+  olayBildir(l, n, line)
+})
+yonetici.on('saticiLog', (botId, line) => {
+  const { uid, n } = botuCoz(botId)
+  adminLog(`(${depo.bul(uid)?.kullaniciAdi || uid}${n > 1 ? ` bot ${n}` : ''}) ${line}`)
+})
+
+// ---------- ÖNEMLİ OLAYLAR ----------
+// Bot ölünce ya da sunucudan atılınca müşteri odada etiketlenir (log satırları
+// kimseyi etiketlemez); atılınca ve otomatik bağlanma bırakılınca DM de gelir.
+// Aynı olay art arda gelirse (ör. ölüp duruyor) etiketleme seyrekleşir.
+const sonBildirim = new Map() // `${botId}:${tur}` -> zaman
+const BILDIRIM_ARALIK = { olum: 2 * 60000, atildi: 10 * 60000, birakti: 0 }
+async function onemliBildir(l, n, tur, metin, { dm = false } = {}) {
+  const anahtar = `${botKimligi(l.userId, n)}:${tur}`
+  if (Date.now() - (sonBildirim.get(anahtar) || 0) < BILDIRIM_ARALIK[tur]) return
+  sonBildirim.set(anahtar, Date.now())
+  const govde = `${botEtiketi(l, n)}${metin}`
+  if (l.kanalId) {
+    const kanal = await kanalGetir(l.kanalId).catch(() => null)
+    await kanal?.send({ content: `<@${l.userId}> ${govde}`, allowedMentions: { users: [l.userId] } }).catch(() => {})
+  }
+  if (dm) await dmGonder(l.userId, `Yaren: ${govde}${l.kanalId ? ` (odan: <#${l.kanalId}>)` : ''}`)
+}
+function olayBildir(l, n, line) {
+  try {
+    let m = line.match(/^\[olum\] (Öldüm.*?)(?: Doğunca eşyalarımı toplamaya gideceğim\.)?$/)
+    if (m) return void onemliBildir(l, n, 'olum', `💀 ${m[1]} Doğunca eşyalarını toplayıp işine dönecek.`)
+    m = line.match(/^\[olay\] Sunucudan atıldı: (.*)$/)
+    if (m) return void onemliBildir(l, n, 'atildi', `⚠️ Bot sunucudan atıldı: ${m[1].slice(0, 300)}`, { dm: true })
+  } catch (_) {}
+}
 
 // ---------- BOT DÜŞERSE YENİDEN BAĞLAN ----------
-const yenidenDeneme = new Map() // userId -> { sayi, zamanlayici }
-const yenidenBaslat = new Set() // kapanınca hemen tekrar başlatılacaklar (ör. yapay zeka süresi bitti)
+const yenidenDeneme = new Map() // botId -> { sayi, zamanlayici }
+const yenidenBaslat = new Set() // kapanınca hemen tekrar başlatılacaklar (botId; ör. yapay zeka süresi bitti)
 let kapaniyor = false
 
-// Kayıtlı ayarlarla başlatır; yapay zeka o anki lisansa göre açılır/kapanır
-function kayitliBaslat(l) {
-  yonetici.baslat(l.userId, {
-    ...l.son,
-    yerelIzin: !!(l.son.yerelIzin && net.isIP(l.son.host)), // sadece satıcının yazdığı IP
+// Kayıtlı ayarlarla başlatır; yapay zeka ve paket o anki lisansa göre
+function kayitliBaslat(l, n = 1) {
+  const son = botKaydi(l, n).son
+  yonetici.baslat(botKimligi(l.userId, n), {
+    ...son,
+    yerelIzin: !!(son.yerelIzin && net.isIP(son.host)), // sadece satıcının yazdığı IP
     ai: depo.aiAktifMi(l),
     sohbet: !l.sohbetKapali,
+    paket: depo.paketleri(l).join(','),
   })
   panelGuncelle() // 🟢 ve "Çalışan bot" sayısı
 }
 
-// Yapay zeka hakkı açıldı/kapandıysa çalışan botu yeni hâliyle yeniden başlat
+// Yapay zeka hakkı açıldı/kapandıysa çalışan botları yeni hâliyle yeniden başlat
 function aiDegistiyse(l, oncekiAi) {
-  if (!l || oncekiAi === depo.aiAktifMi(l) || !yonetici.calisiyor(l.userId)) return false
-  yenidenBaslat.add(l.userId)
-  yonetici.durdur(l.userId)
+  if (!l || oncekiAi === depo.aiAktifMi(l)) return false
+  return botlariYenile(l)
+}
+
+// Çalışan bütün botları kapatıp kayıtlı ayarlarla yeniden açar (yeni paket/yapay zeka geçsin)
+function botlariYenile(l, hak = MAX_BOT) {
+  const botlar = yonetici.kullaniciBotlari(l.userId).filter((id) => botuCoz(id).n <= hak)
+  for (const id of botlar) {
+    yenidenBaslat.add(id)
+    yonetici.durdur(id)
+  }
+  return botlar.length > 0
+}
+
+// Paket ya da bot hakkı değiştiyse: fazla botları durdur, kalanlar yeni paketle açılsın
+function paketDegistiyse(l, oncekiImza) {
+  if (!l || oncekiImza === depo.paketImzasi(l)) return false
+  const hak = depo.botSayisi(l)
+  for (const id of yonetici.kullaniciBotlari(l.userId)) {
+    const { n } = botuCoz(id)
+    if (n <= hak) continue
+    denemeIptal(id)
+    botGuncelle(l.userId, n, { calisiyordu: false })
+    yonetici.durdur(id)
+    log(l.kanalId, `${n}. botun hakkı bitti, durduruldu (paketin: ${depo.paketYazi(l)}).`)
+  }
+  botlariYenile(l, hak)
   return true
 }
 
-function denemeIptal(userId) {
-  clearTimeout(yenidenDeneme.get(userId)?.zamanlayici)
-  yenidenDeneme.delete(userId)
+function denemeIptal(botId) {
+  clearTimeout(yenidenDeneme.get(botId)?.zamanlayici)
+  yenidenDeneme.delete(botId)
+}
+// müşterinin bütün botlarının bekleyen otomatik bağlanmaları
+function denemeleriIptal(uid) {
+  for (const id of [...yenidenDeneme.keys()]) if (botuCoz(id).uid === String(uid)) denemeIptal(id)
+}
+// müşterinin bütün botlarını durdurur ve otomatik bağlanmayı kapatır
+function botlariKapat(uid) {
+  denemeleriIptal(uid)
+  const l = depo.bul(uid)
+  if (l) {
+    const botlar = Object.fromEntries(Object.entries(l.botlar || {}).map(([n, b]) => [n, { ...b, calisiyordu: false }]))
+    depo.guncelle(uid, { calisiyordu: false, botlar })
+  }
+  return yonetici.kullaniciyiDurdur(uid)
 }
 
 // Beklenmedik kapanmada (sunucu kapandı, atıldı, internet gitti) 30 sn arayla
 // en fazla 3 kez dener. Bot yeri doluysa ya da başlatılamazsa o da bir deneme sayılır.
-function yenidenDene(userId) {
-  const l = depo.bul(userId)
-  if (kapaniyor || !l || !depo.aktifMi(l) || !l.calisiyordu || !l.son) return
-  const d = yenidenDeneme.get(userId) || { sayi: 0, zamanlayici: null }
+function yenidenDene(botId) {
+  const { uid, n } = botuCoz(botId)
+  const l = depo.bul(uid)
+  const b = botKaydi(l, n)
+  if (kapaniyor || !l || !depo.aktifMi(l) || !b.calisiyordu || !b.son || n > depo.botSayisi(l)) return
+  const d = yenidenDeneme.get(botId) || { sayi: 0, zamanlayici: null }
   if (d.sayi >= 3) {
-    log(l.kanalId, 'Bot üst üste 3 kez bağlanamadı, otomatik bağlanmayı bıraktım. /baslat ile tekrar başlatabilirsin.')
-    depo.guncelle(userId, { calisiyordu: false })
-    yenidenDeneme.delete(userId)
+    log(l.kanalId, `${botEtiketi(l, n)}Bot üst üste 3 kez bağlanamadı, otomatik bağlanmayı bıraktım. /baslat ile tekrar başlatabilirsin.`)
+    onemliBildir(l, n, 'birakti', '🔌 Bot üst üste 3 kez sunucuya bağlanamadı, otomatik bağlanmayı bıraktım. `/baslat` ile tekrar başlatabilirsin.', { dm: true })
+    botGuncelle(uid, n, { calisiyordu: false })
+    yenidenDeneme.delete(botId)
     return
   }
   d.sayi++
-  log(l.kanalId, `Bağlantı koptu, 30 sn sonra tekrar bağlanıyorum (${d.sayi}/3).`)
+  log(l.kanalId, `${botEtiketi(l, n)}Bağlantı koptu, 30 sn sonra tekrar bağlanıyorum (${d.sayi}/3).`)
   clearTimeout(d.zamanlayici)
   d.zamanlayici = setTimeout(() => {
-    const g = depo.bul(userId)
-    if (kapaniyor || !g || !depo.aktifMi(g) || !g.calisiyordu || !g.son || yonetici.calisiyor(userId)) return
+    const g = depo.bul(uid)
+    const gb = botKaydi(g, n)
+    if (kapaniyor || !g || !depo.aktifMi(g) || !gb.calisiyordu || !gb.son || n > depo.botSayisi(g) || yonetici.calisiyor(botId)) return
     try {
-      kayitliBaslat(g)
+      kayitliBaslat(g, n)
     } catch (e) {
-      log(g.kanalId, 'Tekrar bağlanamadım: ' + e.message)
-      yenidenDene(userId) // ör. bot yerleri doluydu: biraz sonra yine dene
+      log(g.kanalId, `${botEtiketi(g, n)}Tekrar bağlanamadım: ${e.message}`)
+      yenidenDene(botId) // ör. bot yerleri doluydu: biraz sonra yine dene
     }
   }, 30000)
-  yenidenDeneme.set(userId, d)
+  yenidenDeneme.set(botId, d)
 }
 
-yonetici.on('kapandi', (userId, { code, signal, elleDurdu, sure }) => {
+yonetici.on('kapandi', (botId, { code, signal, elleDurdu, sure }) => {
   // Burada fırlayan bir hata bütün Discord botunu (ve bütün müşteri botlarını) düşürürdü
   try {
     panelGuncelle()
-    const l = depo.bul(userId)
-    log(l?.kanalId, `Bot kapandı (${signal ? 'sinyal: ' + signal : 'kod: ' + code}).`)
-    if (yenidenBaslat.delete(userId) && !kapaniyor && l && depo.aktifMi(l) && l.son) {
+    const { uid, n } = botuCoz(botId)
+    const l = depo.bul(uid)
+    const etiket = l ? botEtiketi(l, n) : ''
+    log(l?.kanalId, `${etiket}Bot kapandı (${signal ? 'sinyal: ' + signal : 'kod: ' + code}).`)
+    if (yenidenBaslat.delete(botId) && !kapaniyor && l && depo.aktifMi(l) && botKaydi(l, n).son && n <= depo.botSayisi(l)) {
       try {
-        kayitliBaslat(l)
+        kayitliBaslat(l, n)
       } catch (e) {
-        log(l.kanalId, 'Bot yeniden başlatılamadı: ' + e.message)
+        log(l.kanalId, `${etiket}Bot yeniden başlatılamadı: ${e.message}`)
       }
       return
     }
@@ -272,20 +369,21 @@ yonetici.on('kapandi', (userId, { code, signal, elleDurdu, sure }) => {
       // kalıcı hata (yasak/olmayan adres ya da yanlış sunucu şifresi): tekrar denemenin anlamı yok,
       // yanlış şifreyle tekrar tekrar girmek sunucunun botu banlamasına yol açar
       if (l) {
-        depo.guncelle(userId, { calisiyordu: false })
+        botGuncelle(uid, n, { calisiyordu: false })
         log(
           l.kanalId,
-          code === 4
-            ? 'Sunucu şifreyi kabul etmedi, otomatik bağlanma kapalı. /giris sifre:DOĞRU_ŞİFRE yazıp /baslat yaz.'
-            : 'Bu adrese bağlanılamıyor, otomatik bağlanma kapalı. Adresi kontrol edip /baslat yaz.'
+          etiket +
+            (code === 4
+              ? 'Sunucu şifreyi kabul etmedi, otomatik bağlanma kapalı. /giris sifre:DOĞRU_ŞİFRE yazıp /baslat yaz.'
+              : 'Bu adrese bağlanılamıyor, otomatik bağlanma kapalı. Adresi kontrol edip /baslat yaz.')
         )
       }
       return
     }
     if (elleDurdu) return
-    const d = yenidenDeneme.get(userId)
+    const d = yenidenDeneme.get(botId)
     if (d && sure > 5 * 60000) d.sayi = 0 // uzun süre sorunsuz çalıştıysa sayaç baştan
-    yenidenDene(userId)
+    yenidenDene(botId)
   } catch (e) {
     console.error('kapandi işleyicisi:', e)
   }
@@ -447,9 +545,10 @@ const odaAdi = (ad) =>
     .slice(0, 20) || 'musteri')
 
 function hosgeldin(l) {
+  const hak = depo.botSayisi(l)
   return [
     `Hoş geldin <@${l.userId}>! Bu oda sadece sana özel, botunu buradan yöneteceksin.`,
-    `Lisans bitişi: ${bitisDiscord(l)} | Yapay zeka: **${depo.aiAktifMi(l) && AI_ANAHTAR ? 'açık' : 'kapalı'}**`,
+    `Lisans bitişi: ${bitisDiscord(l)} | Paket: **${depo.paketYazi(l)}** | Yapay zeka: **${depo.aiAktifMi(l) && AI_ANAHTAR ? 'açık' : 'kapalı'}**`,
     l.bitis !== null ? 'Süren bitince bu oda silinir. Yeni key girersen yeniden açılır, ayarların kaybolmaz.' : '',
     '',
     '**Başlamak için:**',
@@ -458,13 +557,18 @@ function hosgeldin(l) {
     '3. Sunucu girişte şifre istiyorsa (`/login`, `/register`): `/giris sifre:BotunŞifresi` yaz, bot her girişte kendisi yazar.',
     'Bir kere yazman yeter, sonraki seferlerde sadece `/baslat` yazabilirsin.',
     '',
-    '**Bu odaya yazman yeter:** "odun kes", "maden kaz", "taş kır", "tarla", "gel", "dur", "durum". Bot yapar, cevabını buraya yazar.',
+    '**Bu odaya yazman yeter:** "odun kes", "maden kaz", "elmas kaz", "taş kır", "tarla", "balık tut", "beni koru", "gel", "dur", "envanter". Bot yapar, cevabını buraya yazar.',
+    hak > 1
+      ? `**${hak} botun var:** komutlarda \`bot:2\` seç (\`/baslat bot:2\`), odaya "2: odun kes" yaz. Seçmezsen 1. bota gider; \`/durdur\` hepsini durdurur.`
+      : '',
     '**Oyunda komut:** `/komut komut:warp xanaxgod` ya da odaya `/warp xanaxgod` yaz, bot oyunda `/warp xanaxgod` yazar.',
     'Oyun sohbeti bu odaya düşer (`/sohbet` ile kapatırsın), `/yaz` ile odadan oyuna yazarsın.',
     'Bot acıkınca yanındaki yemeği kendisi yer, boştayken AFK diye atılmasın diye arada hareket eder.',
+    'Yaratıklarla kendisi savaşır, creeperdan kaçar. Ölürse seni burada etiketler, eşyalarını toplayıp işine döner; sunucudan atılırsa DM de atar. Kazması kırılınca üstündeki en iyi malzemeden (ham demiri eritip) kendine yenisini yapar.',
+    'Her gece günün raporu (ne kesti, ne kazdı, sandığa ne koydu) buraya düşer; istediğin an `/rapor` ve `/envanter`.',
     '',
-    'Diğer komutlar: `/sahip` `/giris` `/sohbet` `/yaz` `/komut` `/gorev` `/durum` `/sandik` `/soyle` `/durdur` `/bilgi`',
-    'Oyun içinde: `!odun` `!maden` `!tas` `!farm` `!topla` `!bosalt` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş' +
+    'Diğer komutlar: `/sahip` `/giris` `/sohbet` `/yaz` `/komut` `/gorev` `/durum` `/envanter` `/rapor` `/sandik` `/soyle` `/durdur` `/bilgi`',
+    'Oyun içinde: `!odun` `!maden` (`!maden elmas`) `!tas` `!farm` `!balik` `!xp` `!koru` `!yap kazma` `!topla` `!bosalt` `!envanter` `!gel` `!dur` `!durum` `!otonom`, ya da "Yaren ..." diye konuş' +
       (depo.aiAktifMi(l) && AI_ANAHTAR ? '.' : ' ("Yaren odun kes", "Yaren gel" gibi; yapay zeka kapalıyken basit cümleleri anlar).'),
     '**Sandık:** bot topladıklarını (bir yığın olunca ve iş kendiliğinden bitince) görevin başladığı yere en yakın sandığa götürür; "dur" dersen yanında tutar, "sandığa koy" dersen götürür. Kendi sandığını göstermek için oyunda dibinde dur ve `!sandik ekle` yaz: o zaman oraya bırakır, baltası/kazması kırılmak üzereyse oradan yenisini de alır.',
   ].join('\n')
@@ -494,7 +598,15 @@ async function odaHazirla(guild, l) {
     permissionOverwrites: odaIzinleri(guild, l.userId, true),
   })
   depo.kanalAyarla(l.userId, kanal.id)
-  await kanal.send({ content: hosgeldin(l), allowedMentions: { users: [l.userId] } })
+  // Discord mesajı en fazla 2000 karakter: satır sınırından böl
+  const parcalar = ['']
+  for (const satir of hosgeldin(l).split('\n')) {
+    if ((parcalar[parcalar.length - 1] + '\n' + satir).length > 1900) parcalar.push('')
+    parcalar[parcalar.length - 1] += (parcalar[parcalar.length - 1] ? '\n' : '') + satir
+  }
+  for (const [k, p] of parcalar.entries()) {
+    await kanal.send({ content: p, allowedMentions: k === 0 ? { users: [l.userId] } : { parse: [] } })
+  }
   return { kanal, yeni: true }
 }
 
@@ -523,6 +635,7 @@ async function keyIsle(user, guild, key, kaynak = '') {
       return { ok: false, metin: 'Şu an yeni oda açılamıyor, satıcıya haber ver. Keyin kullanılmadı.' }
     }
     const oncekiAi = depo.aiAktifMi(onceki)
+    const oncekiImza = onceki ? depo.paketImzasi(onceki) : null
     const oncekiBitis = onceki?.bitis ?? null // kullan() aynı nesneyi değiştirir: önce oku
     const r = depo.kullan(key, { userId: user.id, kullaniciAdi: user.username })
     if (!r.lisans) {
@@ -560,15 +673,21 @@ async function keyIsle(user, guild, key, kaynak = '') {
       ['Kullanan', kim(user)],
       ['Key', onekYaz(k)],
       ['Süre', `${sureYazi(keySuresi(k))}${k.ai ? '' : ' (AI yok)'}`],
+      ['Key paketi', paketYazi([keyPaketi(k)], keyBotSayisi(k))],
       ['Ne oldu', { yeni: 'yeni lisans açıldı', uzatildi: 'süresi uzatıldı', yeniden: 'lisansı yeniden açıldı' }[r.tip]],
       ...(r.tip === 'yeniden' && oncekiBitis !== null ? [['Önceki bitiş', zaman(oncekiBitis)]] : []),
       ['Yeni bitiş', r.lisans.bitis === null ? 'süresiz' : zaman(r.lisans.bitis)],
+      ['Paketi şimdi', depo.paketYazi(r.lisans)],
       ['Nereden', kaynak || '-'],
       ['Üreten', k.olusturan ? `<@${k.olusturan}> (${k.olusturanAdi || k.olusturan})` : 'bilinmiyor'],
       ['Üretildiği an', zaman(k.olusturma)],
       ...(k.alici && k.alici !== user.id ? [['⚠️ Dikkat', `Bu key <@${k.alici}> kişisine verilmişti`, false]] : []),
     ])
-    if (aiDegistiyse(r.lisans, oncekiAi)) log(r.lisans.kanalId, 'Yapay zeka hakkın değişti, bot yeniden başlatılıyor.')
+    const aiDegisti = aiDegistiyse(r.lisans, oncekiAi)
+    const paketDegisti = paketDegistiyse(r.lisans, oncekiImza) && yonetici.kullaniciCalisiyor(user.id)
+    if (aiDegisti || paketDegisti) {
+      log(r.lisans.kanalId, `${aiDegisti ? 'Yapay zeka hakkın' : 'Paketin'} değişti, bot yeniden başlatılıyor.`)
+    }
     adminLog(`🔑 ${user.tag} (${user.id}) key kullandı: ${r.tip}. Bitiş: ${bitisYazi(r.lisans)}`)
     let kanal
     try {
@@ -580,12 +699,12 @@ async function keyIsle(user, guild, key, kaynak = '') {
     if (r.tip !== 'yeni') {
       await kanal
         .send({
-          content: `<@${r.lisans.userId}> ${r.mesaj.split('.')[0]}. Yeni bitiş: ${bitisDiscord(r.lisans)}`,
+          content: `<@${r.lisans.userId}> ${r.mesaj.split('.')[0]}. Yeni bitiş: ${bitisDiscord(r.lisans)}\nPaketin: **${depo.paketYazi(r.lisans)}**`,
           allowedMentions: { users: [r.lisans.userId] },
         })
         .catch(() => {})
     }
-    return { ok: true, metin: `${r.mesaj.split('.')[0]}. Bitiş: ${bitisDiscord(r.lisans)}\nOdan: <#${kanal.id}>`, kanal }
+    return { ok: true, metin: `${r.mesaj.split('.')[0]}. Bitiş: ${bitisDiscord(r.lisans)}\nPaketin: **${depo.paketYazi(r.lisans)}**\nOdan: <#${kanal.id}>`, kanal }
   } finally {
     islemde.delete(user.id)
   }
@@ -708,9 +827,7 @@ function aiAnahtarUygula(anahtar) {
   yonetici.apiKey = anahtar
   let n = 0
   for (const l of depo.ozetListe().lisanslar) {
-    if (!yonetici.calisiyor(l.userId) || !depo.aiAktifMi(l)) continue
-    yenidenBaslat.add(l.userId)
-    yonetici.durdur(l.userId)
+    if (!depo.aiAktifMi(l) || !botlariYenile(l)) continue
     log(l.kanalId, anahtar ? '🤖 Yapay zeka açıldı, botun yeniden bağlanıyor.' : '🤖 Yapay zeka kapatıldı, botun yeniden bağlanıyor.')
     n++
   }
@@ -812,7 +929,31 @@ const GOREV_SECENEK = [
   { name: 'gel', value: 'gel' },
   { name: 'bosalt (sandığa bırak)', value: 'bosalt' },
   { name: 'durum', value: 'durum' },
+  { name: 'elmas kaz (merdivenle derine iner)', value: 'maden elmas' },
+  { name: 'demir kaz', value: 'maden demir' },
+  { name: 'balık tut', value: 'balik' },
+  { name: 'xp (yaratık çiftliğinde bekle, kes)', value: 'xp' },
+  { name: 'beni koru', value: 'koru' },
+  { name: 'envanter (üstünde ne var)', value: 'envanter' },
 ]
+
+// Key paketi: hangi işler + kaç bot ("odun:2" = sadece odun, 2 bot)
+const PAKET_SECIMLERI = ['tam:1', 'tam:2', 'tam:3', 'odun:1', 'odun:2', 'maden:1', 'maden:2', 'farm:1', 'farm:2']
+function paketCoz(v) {
+  const [paket, n] = String(v || 'tam:1').split(':')
+  return { paket: keyPaketi({ paket }), botSayisi: keyBotSayisi({ botSayisi: n }) }
+}
+const paketSecimAdi = (v) => {
+  const p = paketCoz(v)
+  return paketYazi([p.paket], 1) + `, ${p.botSayisi} bot`
+}
+const PAKET_SECENEK = {
+  name: 'paket',
+  description: 'Hangi işler ve kaç bot (varsayılan: tam paket, 1 bot)',
+  type: S.String,
+  choices: PAKET_SECIMLERI.map((v) => ({ name: paketSecimAdi(v), value: v })),
+}
+const BOT_SECENEGI = { name: 'bot', description: 'Hangi botun (birden çok bot hakkın varsa; boşsa 1. bot)', type: S.Integer, min_value: 1, max_value: MAX_BOT }
 
 const COMMANDS = [
   // ---- müşteri ----
@@ -916,6 +1057,22 @@ const COMMANDS = [
     description: 'Yaren ile konuş (yapay zeka): "biraz odun lazım" gibi',
     options: [{ name: 'metin', description: 'Ne diyorsun?', type: S.String, required: true, max_length: 500 }],
   },
+  { name: 'envanter', description: 'Botunun üstündekiler: eşyalar, aletlerin dayanıklılığı, zırh' },
+  {
+    name: 'rapor',
+    description: 'Botunun günlük raporu: ne kesti, ne kazdı, sandığa ne koydu',
+    options: [
+      {
+        name: 'gun',
+        description: 'Hangi gün (varsayılan bugün)',
+        type: S.String,
+        choices: [
+          { name: 'bugün', value: 'bugun' },
+          { name: 'dün', value: 'dun' },
+        ],
+      },
+    ],
+  },
   // ---- satıcı ----
   {
     name: 'key-olustur',
@@ -926,6 +1083,7 @@ const COMMANDS = [
       SURE_MIKTAR,
       { name: 'adet', description: 'Kaç tane (varsayılan 1)', type: S.Integer, min_value: 1, max_value: 25 },
       { name: 'ai', description: 'Yapay zeka dahil mi (varsayılan evet)', type: S.Boolean },
+      PAKET_SECENEK,
     ],
   },
   {
@@ -937,6 +1095,7 @@ const COMMANDS = [
       SURE_BIRIM,
       SURE_MIKTAR,
       { name: 'ai', description: 'Yapay zeka dahil mi (varsayılan evet)', type: S.Boolean },
+      PAKET_SECENEK,
     ],
   },
   { name: 'key-liste', description: 'Keylerin durumu', ...SATICI },
@@ -979,7 +1138,13 @@ const COMMANDS = [
   KUR_KOMUTU,
 ]
 const SATICI_KOMUTLARI = new Set(COMMANDS.filter((c) => c.default_member_permissions === '0').map((c) => c.name))
-const ODA_KOMUTLARI = new Set(['baslat', 'sahip', 'giris', 'sohbet', 'yaz', 'komut', 'durdur', 'durum', 'gorev', 'sandik', 'soyle'])
+// birden çok bot hakkı olan müşteri bu komutlarda "bot" seçer
+for (const c of COMMANDS) {
+  if (['baslat', 'durdur', 'durum', 'gorev', 'sandik', 'giris', 'yaz', 'komut', 'soyle', 'envanter', 'rapor'].includes(c.name)) {
+    c.options = [...(c.options || []), BOT_SECENEGI]
+  }
+}
+const ODA_KOMUTLARI = new Set(['baslat', 'sahip', 'giris', 'sohbet', 'yaz', 'komut', 'durdur', 'durum', 'gorev', 'sandik', 'soyle', 'envanter', 'rapor'])
 
 // ---------- AÇILIŞ ----------
 // Kurulum modu: ayarlarda sunucu yok ya da bot o sunucuda değil. Bot girdiği her
@@ -1131,19 +1296,24 @@ async function sunucuyuBaslat() {
   panelGuncelle()
   setTimeout(() => gunlukYedek().catch(() => {}), 60000) // son yedek 1 günden eskiyse
   // Satıcı botu yeniden başlattıysa (VPS yeniden açıldı vb.) çalışan botları geri getir
-  const geriGelecek = depo.ozetListe().lisanslar.filter((l) => depo.aktifMi(l) && l.calisiyordu && l.son)
-  for (const [n, l] of geriGelecek.entries()) {
+  const geriGelecek = []
+  for (const l of depo.ozetListe().lisanslar) {
+    if (!depo.aktifMi(l)) continue
+    for (let n = 1; n <= depo.botSayisi(l); n++) if (botKaydi(l, n).calisiyordu && botKaydi(l, n).son) geriGelecek.push([l.userId, n])
+  }
+  for (const [sira, [uid, n]] of geriGelecek.entries()) {
     setTimeout(() => {
       // beklerken iptal edilmiş, süresi dolmuş ya da /durdur denmiş olabilir
-      const g = depo.bul(l.userId)
-      if (kapaniyor || !g || !depo.aktifMi(g) || !g.calisiyordu || !g.son || yonetici.calisiyor(g.userId)) return
+      const g = depo.bul(uid)
+      const b = botKaydi(g, n)
+      if (kapaniyor || !g || !depo.aktifMi(g) || !b.calisiyordu || !b.son || n > depo.botSayisi(g) || yonetici.calisiyor(botKimligi(uid, n))) return
       try {
-        kayitliBaslat(g)
-        log(g.kanalId, 'Sistem yeniden başladı, botun tekrar bağlanıyor.')
+        kayitliBaslat(g, n)
+        log(g.kanalId, `${botEtiketi(g, n)}Sistem yeniden başladı, botun tekrar bağlanıyor.`)
       } catch (e) {
-        log(g.kanalId, 'Botun tekrar başlatılamadı: ' + e.message)
+        log(g.kanalId, `${botEtiketi(g, n)}Botun tekrar başlatılamadı: ${e.message}`)
       }
-    }, n * 3000) // hepsi aynı anda bağlanmasın
+    }, sira * 3000) // hepsi aynı anda bağlanmasın
   }
 }
 
@@ -1584,13 +1754,42 @@ async function musteriOdasi(i) {
 const HOST_RE = /^[a-zA-Z0-9.\-]+$/
 const USER_RE = /^[a-zA-Z0-9_]{3,16}$/
 
+// Komutta bot seçilmediyse: 1. bot çalışıyorsa (ya da hiçbiri çalışmıyorsa) o, değilse çalışan ilk bot
+function varsayilanBot(l) {
+  const calisan = yonetici.kullaniciBotlari(l.userId).map((id) => botuCoz(id).n)
+  return calisan.includes(1) || !calisan.length ? 1 : calisan[0]
+}
+// 2. ve 3. bot ilk açılışta 1. botun sunucusunu ve sahibini alır, adının sonuna numara eklenir
+function ekBotAyari(l, n) {
+  const ilk = l.son || {}
+  const ad = (ilk.user || DEFAULT_BOT_NAME).slice(0, 15)
+  return { host: ilk.host, port: ilk.port, auth: ilk.auth, version: ilk.version, owner: ilk.owner, user: `${ad}${n}` }
+}
+const botSecenegiVar = (i) => i.options?.data?.some?.((o) => o.name === 'bot')
+
 async function odaKomutu(i, l) {
   const uid = l.userId
+  // Birden çok bot hakkı varsa komut "bot" seçeneğiyle hangi bota gideceğini seçer
+  const hak = depo.botSayisi(l)
+  let n = i.options.getInteger?.('bot') ?? null
+  if (n !== null && n > hak) {
+    return i.reply(gizli(hak > 1 ? `Lisansında ${hak} bot hakkı var: \`bot:1\` ile \`bot:${hak}\` arası.` : 'Lisansında tek bot hakkı var. Ek bot için satıcıyla görüş.'))
+  }
+  const secildi = n !== null
+  if (n === null) n = i.commandName === 'baslat' ? 1 : varsayilanBot(l)
+  const bid = botKimligi(uid, n)
+  const bk = botKaydi(l, n)
+  const et = botEtiketi(l, n)
 
   if (i.commandName === 'baslat') {
     await i.deferReply()
-    if (yonetici.calisiyor(uid)) return i.editReply('Botun zaten çalışıyor. Önce /durdur yaz.')
-    const son = l.son || {}
+    if (yonetici.calisiyor(bid)) {
+      const bos = Array.from({ length: hak }, (_, k) => k + 1).find((k) => !yonetici.calisiyor(botKimligi(uid, k)))
+      return i.editReply(
+        `${et}Botun zaten çalışıyor. Önce /durdur yaz.` + (!secildi && bos ? `\nDiğer botunu açmak için: \`/baslat bot:${bos}\`` : '')
+      )
+    }
+    const son = bk.son || (n > 1 ? ekBotAyari(l, n) : {})
     const secilen = (ad) => (i.options.getString(ad) || '').trim()
     // "oyna.sunucu.com:25566", "http://1.2.3.4:25565/" gibi yazılanları da anla
     const hamHost = secilen('host')
@@ -1612,8 +1811,15 @@ async function odaKomutu(i, l) {
     }
     if (owner && !USER_RE.test(owner)) return i.editReply('Sahip adı geçerli bir Minecraft adı olmalı (3-16 karakter: harf, rakam, _).')
     if (version && !/^\d+\.\d+(\.\d+)?$/.test(version)) return i.editReply('Sürüm 1.20.4 gibi yazılmalı.')
+    // aynı sunucuya aynı adla iki bot girerse birbirini atar
+    for (const id of yonetici.kullaniciBotlari(uid)) {
+      const b = yonetici.bilgi(id)
+      if (id !== bid && b && String(b.host).toLowerCase() === host.toLowerCase() && Number(b.port) === port && String(b.user).toLowerCase() === user.toLowerCase()) {
+        return i.editReply(`${botuCoz(id).n}. botun bu sunucuda zaten **${user}** adıyla. Bu bota başka bir ad ver: \`kullanici:\``)
+      }
+    }
     // Bekleyen otomatik bağlanma, DNS kontrolü sürerken eski ayarlarla başlamasın
-    denemeIptal(uid)
+    denemeIptal(bid)
     // Satıcı (destek/test için) yerel bir IP'ye bağlatabilir. Sadece IP olarak
     // yazılırsa: alan adı olsaydı müşteri DNS'ini sonradan iç ağa çevirip
     // otomatik bağlanmada bu izni kullanabilirdi.
@@ -1625,24 +1831,26 @@ async function odaKomutu(i, l) {
     await i.editReply(`Sunucu yoklanıyor: **${host}:${port}**...`).catch(() => {})
     const ulasim = await sunucuyaUlasilir(host, port)
     if (!ulasim.ok) return i.editReply(baglantiHatasiMetni(ulasim.kod, `${ulasim.host}:${ulasim.port}`, ulasim.bedrock))
-    if (yonetici.calisiyor(uid)) return i.editReply('Botun zaten çalışıyor. Önce /durdur yaz.')
-    // adres kontrolü birkaç saniye sürebilir; bu arada lisans dolmuş/iptal edilmiş olabilir
-    if (!depo.aktifMi(depo.bul(uid))) return i.editReply('Lisans süren doldu, bot başlatılmadı. Yeni key: /key-gir')
+    if (yonetici.calisiyor(bid)) return i.editReply(`${et}Botun zaten çalışıyor. Önce /durdur yaz.`)
+    // adres kontrolü birkaç saniye sürebilir; bu arada lisans dolmuş/iptal edilmiş ya da bot hakkı bitmiş olabilir
+    const guncel = depo.bul(uid)
+    if (!depo.aktifMi(guncel)) return i.editReply('Lisans süren doldu, bot başlatılmadı. Yeni key: /key-gir')
+    if (n > depo.botSayisi(guncel)) return i.editReply(`${n}. botun hakkı bitti, bot başlatılmadı.`)
     // adres kontrolü sürerken /sahip ile ad verilmiş olabilir: eski adla ezme
-    if (!secilen('sahip')) owner = depo.bul(uid).son?.owner || ''
+    if (!secilen('sahip')) owner = botKaydi(guncel, n).son?.owner || guncel.son?.owner || ''
 
     const ayar = { host, port, user, auth, version, owner, yerelIzin }
     try {
-      yonetici.baslat(uid, { ...ayar, ai: depo.aiAktifMi(l), sohbet: !depo.bul(uid)?.sohbetKapali })
+      yonetici.baslat(bid, { ...ayar, ai: depo.aiAktifMi(guncel), sohbet: !guncel.sohbetKapali, paket: depo.paketleri(guncel).join(',') })
     } catch (e) {
       return i.editReply(e.message)
     }
-    depo.guncelle(uid, { son: ayar, calisiyordu: true })
+    botGuncelle(uid, n, { son: ayar, calisiyordu: true })
     panelGuncelle()
-    adminLog(`▶️ ${l.kullaniciAdi} botu başlattı: ${host}:${port} (${user}, ${auth}). Çalışan: ${yonetici.sayi()}/${ayarlar.maxBot}`)
-    log(l.kanalId, `Başlatılıyor: ${host}:${port} (${user}, ${auth}${version ? ', ' + version : ''}, sahip: ${owner || 'henüz yok'})`)
+    adminLog(`▶️ ${l.kullaniciAdi} ${n > 1 ? `${n}. botunu` : 'botu'} başlattı: ${host}:${port} (${user}, ${auth}). Çalışan: ${yonetici.sayi()}/${ayarlar.maxBot}`)
+    log(l.kanalId, `${et}Başlatılıyor: ${host}:${port} (${user}, ${auth}${version ? ', ' + version : ''}, sahip: ${owner || 'henüz yok'})`)
     return i.editReply(
-      `Bot başlatılıyor: **${host}:${port}**. Loglar birazdan bu odaya düşecek.` +
+      `${et}Bot başlatılıyor: **${host}:${port}** (**${user}**). Loglar birazdan bu odaya düşecek.` +
         (auth === 'microsoft' ? '\nMicrosoft girişi için kod birazdan burada görünecek.' : '') +
         (owner
           ? `\nOyunda **${owner}** oyuncusunun yazdıklarını yapacak. Değiştirmek için: \`/sahip ad:YeniAd\``
@@ -1661,13 +1869,19 @@ async function odaKomutu(i, l) {
       )
     }
     if (!USER_RE.test(ad)) return i.reply('Minecraft adı 3-16 karakter olmalı (harf, rakam, _).')
+    // sahip bütün botlar için aynı
     depo.guncelle(uid, { son: { ...(l.son || {}), owner: ad } })
+    for (const k of Object.keys(depo.bul(uid).botlar || {})) {
+      const b = botKaydi(depo.bul(uid), Number(k))
+      if (b.son) botGuncelle(uid, Number(k), { son: { ...b.son, owner: ad } })
+    }
     const nasil = '\nOyunda: `!odun` `!maden` `!tas` `!farm` `!topla` `!gel` `!dur` `!durum` `!yardim` ya da "Yaren ..." diye konuş. Bu odaya "odun kes" gibi yazman da yeter.'
-    if (!yonetici.calisiyor(uid)) {
+    const calisan = yonetici.kullaniciBotlari(uid)
+    if (!calisan.length) {
       return i.reply(`Tamam, sahip: **${ad}**. \`/baslat\` ile bot girince oyunda sadece senin yazdıklarını yapacak.${nasil}`)
     }
     await i.deferReply()
-    const r = await yonetici.istek(uid, 'sahip', { ad })
+    const [r] = await Promise.all(calisan.map((id) => yonetici.istek(id, 'sahip', { ad })))
     if (r.kod !== 200) {
       return i.editReply(`Bota şu an ulaşamadım (${r.veri?.hata || r.kod}). Ad kaydedildi: bot yeniden başlayınca **${ad}** oyuncusunu dinler.`)
     }
@@ -1681,11 +1895,11 @@ async function odaKomutu(i, l) {
 
   if (i.commandName === 'giris') {
     const sifre = (i.options.getString('sifre') || '').trim()
-    const host = l.son?.host
-    if (!host) return i.reply(gizli('Önce `/baslat host:sunucu.adresi` ile sunucunu yaz, şifre o sunucu için kaydedilir.'))
-    const port = l.son?.port || 25565
+    const host = bk.son?.host
+    if (!host) return i.reply(gizli(`Önce \`/baslat${n > 1 ? ` bot:${n}` : ''} host:sunucu.adresi\` ile sunucunu yaz, şifre o sunucu için kaydedilir.`))
+    const port = bk.son?.port || 25565
     const adres = port === 25565 ? host : `${host}:${port}`
-    const kayitli = !!yonetici.sunucuSifresi(uid, host, port)
+    const kayitli = !!yonetici.sunucuSifresi(bid, host, port)
     if (!sifre) {
       return i.reply(
         gizli(
@@ -1697,106 +1911,140 @@ async function odaKomutu(i, l) {
     }
     const sil = sifre.toLowerCase() === 'sil'
     if (!sil && !/^[^\s]{3,64}$/.test(sifre)) return i.reply(gizli('Şifre 3-64 karakter olmalı ve boşluk içermemeli.'))
-    yonetici.sunucuSifresiKaydet(uid, host, port, sil ? '' : sifre)
+    yonetici.sunucuSifresiKaydet(bid, host, port, sil ? '' : sifre)
     // çalışan bot aynı sunucudaysa hemen uygula
     let ek = ''
-    const b = yonetici.bilgi(uid)
-    if (yonetici.calisiyor(uid) && b?.host === host && Number(b?.port) === Number(port)) {
-      const r = await yonetici.istek(uid, 'giris', { sifre: sil ? '' : sifre })
+    const b = yonetici.bilgi(bid)
+    if (yonetici.calisiyor(bid) && b?.host === host && Number(b?.port) === Number(port)) {
+      const r = await yonetici.istek(bid, 'giris', { sifre: sil ? '' : sifre })
       if (r.kod === 200 && !sil) ek = r.veri.cevap === 'deneniyor' ? ' Bot şimdi giriş yapmayı deniyor.' : ''
     }
     return i.reply(
-      gizli(sil ? `**${adres}** için şifre silindi.` : `Şifre kaydedildi (**${adres}**). Bot sunucu isteyince kendisi giriş yapar.${ek} Şifre hiçbir yerde gösterilmez.`)
+      gizli(sil ? `${et}**${adres}** için şifre silindi.` : `${et}Şifre kaydedildi (**${adres}**). Bot sunucu isteyince kendisi giriş yapar.${ek} Şifre hiçbir yerde gösterilmez.`)
     )
   }
 
   if (i.commandName === 'sohbet') {
     const acik = i.options.getString('durum') === 'acik'
     depo.guncelle(uid, { sohbetKapali: !acik })
-    if (yonetici.calisiyor(uid)) await yonetici.istek(uid, 'sohbet', { acik })
+    await Promise.all(yonetici.kullaniciBotlari(uid).map((id) => yonetici.istek(id, 'sohbet', { acik })))
     return i.reply(acik ? 'Oyun sohbeti bu odaya aktarılacak.' : 'Oyun sohbeti artık bu odaya aktarılmayacak.')
   }
 
   if (i.commandName === 'yaz') {
-    if (!yonetici.calisiyor(uid)) return i.reply(gizli('Botun çalışmıyor. Önce /baslat yaz.'))
+    if (!yonetici.calisiyor(bid)) return i.reply(gizli(`${et}Botun çalışmıyor. Önce /baslat yaz.`))
     const mesaj = i.options.getString('mesaj')
-    const r = await yonetici.istek(uid, 'yaz', { metin: mesaj })
+    const r = await yonetici.istek(bid, 'yaz', { metin: mesaj })
     if (r.kod !== 200) return i.reply(gizli('Yazılamadı: ' + (r.veri?.hata || r.kod)))
     // giriş komutunda şifre olabilir: odaya gösterme
     // komutlarda şifre/kod olabilir (/login, /giris, /kayit, /cp, /2fa...): sadece yazana görünsün
     if (mesaj.trim().startsWith('/')) return i.reply(gizli('Komut oyunda yazıldı.'))
-    return i.reply({ content: `Oyunda yazıldı: ${mesaj}`, allowedMentions: { parse: [] } })
+    return i.reply({ content: `${et}Oyunda yazıldı: ${mesaj}`, allowedMentions: { parse: [] } })
   }
 
   if (i.commandName === 'komut') {
-    if (!yonetici.calisiyor(uid)) return i.reply(gizli('Botun çalışmıyor. Önce /baslat yaz.'))
+    if (!yonetici.calisiyor(bid)) return i.reply(gizli(`${et}Botun çalışmıyor. Önce /baslat yaz.`))
     const komut = oyunKomutu(i.options.getString('komut'))
     if (!komut) return i.reply(gizli('Komutu yaz: örn. `/komut komut:warp xanaxgod` (oyunda /warp xanaxgod yazar).'))
     const sifreli = sifreliKomut(komut)
     await i.deferReply(sifreli ? { flags: MessageFlags.Ephemeral } : {}) // bot meşgulse cevap 3 sn'yi geçebilir
-    const r = await oyundaCalistir(uid, komut)
+    const r = await oyundaCalistir(bid, komut)
     if (r.hata) return i.editReply(r.hata)
     if (sifreli) return i.editReply('Komut oyunda yazıldı (şifre içerebileceği için burada gösterilmiyor).')
-    return i.editReply({ content: `🎮 Oyunda yazıldı: ${kodYaz(komut)}${l.sohbetKapali ? SOHBET_KAPALI_NOTU : ''}`, allowedMentions: { parse: [] } })
+    return i.editReply({ content: `${et}🎮 Oyunda yazıldı: ${kodYaz(komut)}${l.sohbetKapali ? SOHBET_KAPALI_NOTU : ''}`, allowedMentions: { parse: [] } })
   }
 
   if (i.commandName === 'durdur') {
-    denemeIptal(uid)
-    depo.guncelle(uid, { calisiyordu: false })
-    if (!yonetici.durdur(uid)) return i.reply('Botun zaten çalışmıyor.')
-    return i.reply('Bot durduruluyor.')
+    if (!secildi) {
+      // bot seçilmediyse hepsi durur
+      const sayi = botlariKapat(uid)
+      if (!sayi) return i.reply('Botun zaten çalışmıyor.')
+      return i.reply(sayi > 1 ? `${sayi} botun durduruluyor.` : 'Bot durduruluyor.')
+    }
+    denemeIptal(bid)
+    botGuncelle(uid, n, { calisiyordu: false })
+    if (!yonetici.durdur(bid)) return i.reply(`${et}Botun zaten çalışmıyor.`)
+    return i.reply(`${et}Bot durduruluyor.`)
   }
 
   if (i.commandName === 'durum') {
-    const info = yonetici.bilgi(uid)
-    if (!info) return i.reply('Botun çalışmıyor. Başlatmak için /baslat yaz.')
+    const botlar = secildi ? [bid].filter((id) => yonetici.calisiyor(id)) : yonetici.kullaniciBotlari(uid)
+    if (!botlar.length) return i.reply(`${secildi ? et : ''}Botun çalışmıyor. Başlatmak için /baslat yaz.`)
     await i.deferReply() // bot takılırsa 2,5 sn bekleriz: Discord'un 3 sn sınırı aşılmasın
-    const r = await yonetici.istek(uid, 'durum')
-    const s = r.veri || {}
-    let oyun
-    if (r.kod !== 200) oyun = 'Oyundaki durumu alınamadı.'
-    else if (s.hazir === false) oyun = 'Henüz oyuna girmedi.'
-    else {
-      oyun =
-        `Görev: ${s.aktif_gorev || 'yok'}${s.otonom ? ' (otonom)' : ''}` +
-        ` | Can: ${Math.round(s.can)}/20 | Açlık: ${s.aclik}/20 | Boş slot: ${s.bos_slot}` +
-        ` | Konum: ${s.konum.join(', ')}` +
-        `\nSahip: ${s.sahip ? `**${s.sahip}**${s.sahip_gorunuyor ? '' : ' (şu an yakında değil)'}` : 'yok, `/sahip ad:OyunAdın` yaz'}`
-    }
-    return i.editReply(`Çalışıyor: **${info.host}:${info.port}** (${info.user}, ${info.auth})\n${oyun}`)
+    const parcalar = await Promise.all(
+      botlar.map(async (id) => {
+        const info = yonetici.bilgi(id) || {}
+        const r = await yonetici.istek(id, 'durum')
+        const s = r.veri || {}
+        let oyun
+        if (r.kod !== 200) oyun = 'Oyundaki durumu alınamadı.'
+        else if (s.hazir === false) oyun = 'Henüz oyuna girmedi.'
+        else {
+          oyun =
+            `Görev: ${s.aktif_gorev || 'yok'}${s.otonom ? ' (otonom)' : ''}` +
+            ` | Can: ${Math.round(s.can)}/20 | Açlık: ${s.aclik}/20 | Boş slot: ${s.bos_slot}` +
+            ` | Konum: ${s.konum.join(', ')}` +
+            `\nSahip: ${s.sahip ? `**${s.sahip}**${s.sahip_gorunuyor ? '' : ' (şu an yakında değil)'}` : 'yok, `/sahip ad:OyunAdın` yaz'}`
+        }
+        return `${botEtiketi(l, botuCoz(id).n)}Çalışıyor: **${info.host}:${info.port}** (${info.user}, ${info.auth})\n${oyun}`
+      })
+    )
+    const ek = !secildi && hak > 1 && botlar.length < hak ? `\n_(${hak} bot hakkın var, ${botlar.length} tanesi çalışıyor.)_` : ''
+    return i.editReply({ content: (parcalar.join('\n\n') + ek).slice(0, 2000), allowedMentions: { parse: [] } })
   }
 
   if (i.commandName === 'gorev') {
-    if (!yonetici.calisiyor(uid)) return i.reply('Botun çalışmıyor. Önce /baslat yaz.')
+    if (!yonetici.calisiyor(bid)) return i.reply(`${et}Botun çalışmıyor. Önce /baslat yaz.`)
     const komut = i.options.getString('gorev')
     await i.deferReply()
-    const r = await yonetici.istek(uid, 'komut', { komut })
+    const r = await yonetici.istek(bid, 'komut', { komut })
     if (r.kod !== 200) return i.editReply('Bota ulaşamadım: ' + (r.veri?.hata || r.kod))
-    return i.editReply(`**${komut}** → ${r.veri.cevap || 'gönderildi'}`)
+    return i.editReply(`${et}**${komut}** → ${r.veri.cevap || 'gönderildi'}`)
   }
 
   if (i.commandName === 'sandik') {
-    if (!yonetici.calisiyor(uid)) return i.reply('Botun çalışmıyor. Önce /baslat yaz (sandıklar sunucu başına kaydedilir).')
+    if (!yonetici.calisiyor(bid)) return i.reply(`${et}Botun çalışmıyor. Önce /baslat yaz (sandıklar sunucu başına kaydedilir).`)
     const islem = i.options.getString('islem')
     const xyz = ['x', 'y', 'z'].map((k) => i.options.getInteger(k))
     const verilen = xyz.filter((v) => v !== null).length
     if (verilen !== 0 && verilen !== 3) return i.reply('Koordinat yazacaksan x, y ve z üçünü de yaz.')
     await i.deferReply()
-    const r = await yonetici.istek(uid, 'komut', { komut: ['sandik', islem, ...(verilen ? xyz : [])].join(' ') })
+    const r = await yonetici.istek(bid, 'komut', { komut: ['sandik', islem, ...(verilen ? xyz : [])].join(' ') })
     if (r.kod !== 200) return i.editReply('Bota ulaşamadım: ' + (r.veri?.hata || r.kod))
-    return i.editReply(r.veri.cevap)
+    return i.editReply({ content: et + r.veri.cevap, allowedMentions: { parse: [] } })
+  }
+
+  if (i.commandName === 'envanter') {
+    if (!yonetici.calisiyor(bid)) return i.reply(gizli(`${et}Botun çalışmıyor. Önce /baslat yaz.`))
+    await i.deferReply()
+    const r = await yonetici.istek(bid, 'envanter')
+    if (r.kod !== 200) return i.editReply('Envanteri alamadım: ' + (r.veri?.hata || r.kod))
+    return i.editReply({ content: envanterMetni(r.veri, et).slice(0, 2000), allowedMentions: { parse: [] } })
+  }
+
+  if (i.commandName === 'rapor') {
+    const dun = i.options.getString('gun') === 'dun'
+    const gun = trGun(Date.now() - (dun ? GUN : 0))
+    await i.deferReply()
+    const botlar = secildi || hak === 1 ? [n] : Array.from({ length: hak }, (_, k) => k + 1)
+    const parcalar = []
+    for (const b of botlar) {
+      const g = gununVerisi(await istatistikAl(botKimligi(uid, b)), gun)
+      parcalar.push(raporMetni(g, `${botEtiketi(l, b)}${dun ? 'Dünün' : 'Bugünün'} raporu — ${gunYazi(gun)}`) || `${botEtiketi(l, b)}${dun ? 'Dün' : 'Bugün'} henüz bir iş yapmadı.`)
+    }
+    return i.editReply({ content: parcalar.join('\n\n').slice(0, 2000), allowedMentions: { parse: [] } })
   }
 
   if (i.commandName === 'soyle') {
     // yapay zeka yoksa (lisansta yok ya da satıcı anahtar eklememiş) bot basit cümleleri yine anlar
     const basitMod = !depo.aiAktifMi(l) || !AI_ANAHTAR
-    if (!yonetici.calisiyor(uid)) return i.reply('Botun çalışmıyor. Önce /baslat yaz.')
+    if (!yonetici.calisiyor(bid)) return i.reply(`${et}Botun çalışmıyor. Önce /baslat yaz.`)
     await i.deferReply()
     const metin = i.options.getString('metin')
-    const r = await yonetici.istek(uid, 'soyle', { metin }, 90000)
+    const r = await yonetici.istek(bid, 'soyle', { metin }, 90000)
     if (r.kod !== 200) return i.editReply('Yaren cevap veremedi: ' + (r.veri?.hata || r.kod))
     const govde =
-      `> ${metin}\n**Yaren:** ${r.veri.cevap}` +
+      `> ${metin}\n${et}**Yaren:** ${r.veri.cevap}` +
       (basitMod ? '\n_(Basit mod: yapay zeka kapalı, "odun kes", "gel", "dur" gibi istekleri anlarım.)_' : '')
     return i.editReply({
       content: govde.length > 2000 ? govde.slice(0, 1997) + '…' : govde, // uzun cevap kaybolmasın
@@ -1804,6 +2052,166 @@ async function odaKomutu(i, l) {
     })
   }
 }
+
+// ---------- ENVANTER VE GÜNLÜK RAPOR ----------
+// Türkiye saati (UTC+3, yaz saati yok): gün "2026-10-10", saat 2356 gibi
+const trSaat = (ms = Date.now()) => new Date(ms + 3 * SAAT)
+const trGun = (ms = Date.now()) => trSaat(ms).toISOString().slice(0, 10)
+const gunYazi = (gun) => gun.split('-').reverse().join('.')
+const adYaz = (ad) => String(ad).replace(/_/g, ' ')
+
+function envanterMetni(e, et = '') {
+  const dayanik = (x) => (x.dayanik ? ` (${x.dayanik.kalan}/${x.dayanik.en})` : '')
+  const esyalar = new Map()
+  const aletler = []
+  for (const x of e.esyalar || []) {
+    if (x.dayanik) aletler.push(x)
+    else esyalar.set(x.gorunen, (esyalar.get(x.gorunen) || 0) + x.adet)
+  }
+  const satir = [`🎒 ${et}**Envanter** (boş yer: ${e.bos_slot})`]
+  if (e.el) satir.push(`Elinde: ${e.el.gorunen}${e.el.adet > 1 ? ` ×${e.el.adet}` : ''}${dayanik(e.el)}`)
+  if (e.zirh?.length) satir.push(`Zırh: ${e.zirh.map((x) => x.gorunen + dayanik(x)).join(', ')}`)
+  if (aletler.length) satir.push(`Aletler: ${aletler.map((x) => x.gorunen + dayanik(x)).join(', ')}`)
+  if (esyalar.size) {
+    satir.push(`Eşyalar: ${[...esyalar].sort((a, b) => b[1] - a[1]).map(([ad, n]) => `${ad} ×${n}`).join(', ')}`)
+  } else if (!aletler.length) satir.push('Üstünde eşya yok.')
+  return satir.join('\n')
+}
+
+// Oyun botunun istatistiği: çalışıyorsa ondan, değilse kaydettiği dosyadan
+async function istatistikAl(botId) {
+  if (yonetici.calisiyor(botId)) {
+    const r = await yonetici.istek(botId, 'istatistik')
+    if (r.kod === 200) return r.veri
+  }
+  try {
+    return JSON.parse(fs.readFileSync(path.join(yonetici.veriKlasoru(botId), 'istatistik.json'), 'utf-8'))
+  } catch (_) {
+    return null
+  }
+}
+const gununVerisi = (ist, gun) => (ist?.bugun?.gun === gun ? ist.bugun : ist?.dun?.gun === gun ? ist.dun : null)
+
+const ODUN_RE = /_(log|stem|wood|hyphae)$/
+const TAS_RE = /^(stone|cobblestone|deepslate|cobbled_deepslate|andesite|diorite|granite|tuff|blackstone|basalt|netherrack|calcite|sandstone|end_stone)$/
+const CEVHER_ADLARI = [
+  ['diamond', 'elmas'],
+  ['emerald', 'zümrüt'],
+  ['gold', 'altın'],
+  ['iron', 'demir'],
+  ['redstone', 'kızıltaş'],
+  ['lapis', 'lapis'],
+  ['copper', 'bakır'],
+  ['coal', 'kömür'],
+  ['quartz', 'kuvars'],
+  ['ancient_debris', 'antik kalıntı'],
+]
+const URUN_ADLARI = {
+  wheat: 'buğday',
+  carrots: 'havuç',
+  potatoes: 'patates',
+  beetroots: 'pancar',
+  nether_wart: 'nether siğili',
+  sugar_cane: 'şeker kamışı',
+  pumpkin: 'balkabağı',
+  melon: 'karpuz',
+  bamboo: 'bambu',
+  cocoa: 'kakao',
+}
+const YARATIK_ADLARI = {
+  zombie: 'zombi',
+  husk: 'çöl zombisi',
+  drowned: 'boğulmuş',
+  skeleton: 'iskelet',
+  stray: 'başıboş',
+  spider: 'örümcek',
+  cave_spider: 'mağara örümceği',
+  witch: 'cadı',
+  slime: 'balçık',
+  enderman: 'enderman',
+  zombified_piglin: 'zombi piglin',
+  creeper: 'creeper',
+}
+const toplam = (o) => Object.values(o || {}).reduce((a, b) => a + b, 0)
+const enCok = (o, n = 5, ad = adYaz) =>
+  Object.entries(o || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([k, v]) => `${ad(k)} ${v}`)
+    .join(', ')
+
+// Bir günün istatistiğinden okunur rapor (iş yoksa null)
+function raporMetni(g, baslik) {
+  if (!g) return null
+  const odun = {}
+  const maden = {}
+  const urun = {}
+  let tas = 0
+  let diger = 0
+  for (const [ad, n] of Object.entries(g.kirilan || {})) {
+    const cevher = /_ore$|ancient_debris/.test(ad) && CEVHER_ADLARI.find(([k]) => ad.includes(k))
+    if (ODUN_RE.test(ad)) odun[ad] = n
+    else if (cevher) maden[cevher[1]] = (maden[cevher[1]] || 0) + n
+    else if (URUN_ADLARI[ad]) urun[URUN_ADLARI[ad]] = (urun[URUN_ADLARI[ad]] || 0) + n
+    else if (TAS_RE.test(ad)) tas += n
+    else diger += n
+  }
+  const satir = []
+  if (toplam(odun)) satir.push(`🪓 Odun: **${toplam(odun)}** kütük (${enCok(odun, 4, (k) => adYaz(k.replace(ODUN_RE, '')))})`)
+  if (toplam(maden)) satir.push(`⛏️ Maden: ${enCok(maden, 10, (k) => k)}`)
+  if (tas) satir.push(`🪨 Taş: **${tas}** blok`)
+  if (toplam(urun)) satir.push(`🌾 Tarla: **${toplam(urun)}** ürün (${enCok(urun, 5, (k) => k)})`)
+  if (toplam(g.balik)) satir.push(`🎣 Balık: **${toplam(g.balik)}** (${enCok(g.balik)})`)
+  if (toplam(g.yaratik)) satir.push(`⚔️ Kesilen yaratık: **${toplam(g.yaratik)}** (${enCok(g.yaratik, 5, (k) => YARATIK_ADLARI[k] || adYaz(k))})`)
+  if (toplam(g.birakilan)) satir.push(`📦 Sandığa koyduğu: **${toplam(g.birakilan)}** eşya (${enCok(g.birakilan)})`)
+  if (toplam(g.yapilan)) satir.push(`🛠️ Kendine yaptığı: ${enCok(g.yapilan)}`)
+  if (g.olum) satir.push(`💀 Ölüm: ${g.olum}`)
+  if (diger) satir.push(`Kırdığı diğer bloklar: ${diger}`)
+  if (!satir.length) return null
+  return `📊 **${baslik}**\n${satir.join('\n')}`
+}
+
+// Her gün rapor saatinde (ayarlar.json "rapor_saati", varsayılan 23:55, Türkiye saati)
+// o gün iş yapmış her botun raporu odasına düşer. Discord botu o saatte kapalıysa
+// 12 saat içinde açılınca o günün raporu yine gelir.
+const RAPOR_DAKIKA = (() => {
+  const m = String(ayarlar.raporSaati || '').match(/^(\d{1,2})[:.](\d{2})$/)
+  return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null // "kapali" ya da bozuksa gönderilmez
+})()
+let raporCalisiyor = false
+async function gunlukRapor() {
+  if (RAPOR_DAKIKA === null || raporCalisiyor || !client.isReady() || kurulumModu) return
+  raporCalisiyor = true
+  try {
+    const simdi = Date.now()
+    const t = trSaat(simdi)
+    const dakika = t.getUTCHours() * 60 + t.getUTCMinutes()
+    // bugünün saati geldiyse bugün, gelmediyse dünkü saatten bu yana 12 saat geçmediyse dün
+    let gun
+    if (dakika >= RAPOR_DAKIKA) gun = trGun(simdi)
+    else if (dakika + 1440 - RAPOR_DAKIKA <= 720) gun = trGun(simdi - GUN)
+    else return
+    const zamaninda = dakika >= RAPOR_DAKIKA && dakika - RAPOR_DAKIKA < 5
+    for (const l of depo.ozetListe().lisanslar) {
+      if (!depo.aktifMi(l) || !l.kanalId) continue
+      for (let n = 1; n <= depo.botSayisi(l); n++) {
+        const b = botKaydi(l, n)
+        if (b.raporGunu === gun) continue
+        botGuncelle(l.userId, n, { raporGunu: gun })
+        if (b.raporGunu === undefined && !zamaninda) continue // ilk çalıştırma: geçmiş günü atma
+        const metin = raporMetni(gununVerisi(await istatistikAl(botKimligi(l.userId, n)), gun), `${botEtiketi(l, n)}Günlük rapor — ${gunYazi(gun)}`)
+        if (!metin) continue
+        const kanal = await kanalGetir(l.kanalId).catch(() => null)
+        await kanal?.send({ content: metin.slice(0, 2000), allowedMentions: { parse: [] } }).catch(() => {})
+      }
+    }
+  } catch (e) {
+    console.error('Günlük rapor:', e.message)
+  } finally {
+    raporCalisiyor = false
+  }
+}
+setInterval(() => gunlukRapor(), 60000)
 
 // ---------- OYUNDA KOMUT (/komut ve odaya "/" ile yazılanlar) ----------
 // Şifre olabilecek komutlar (/login, /register, /sifredegistir, /authme:login...) odada
@@ -1846,6 +2254,7 @@ async function oyundaCalistir(uid, komut) {
 //   "odun kes", "maden kaz", "gel", "dur"  -> Yaren anlar (yapay zeka ya da basit mod)
 //   "/warp xanaxgod"                        -> oyunda komut olarak yazılır (/komut gibi)
 //   "!maden", "!sandik ekle"                -> oyun içi komut
+//   "2: odun kes", "bot2 maden kaz"         -> birden çok bot hakkı varsa o bota gider
 // Mesajlar sırayla işlenir; cevap mesaja yanıt olarak yazılır.
 const odaSirasi = new Map() // userId -> { is: Promise, bekleyen }
 const icerikUyarildi = new Map() // userId -> zaman: yazılanı okuyamıyoruz uyarısı
@@ -1870,6 +2279,13 @@ async function odaMesaji(m) {
   let metin = String(m.content || '').replace(benim, ' ').trim()
   // "/komut warp x" ya da "/yaz mesaj:selam" komut seçilmeden düz mesaj olarak gittiyse
   let sohbet = false
+  // "2: odun kes" / "bot2 odun kes": hangi bot
+  let botNo = null
+  const botKalip = metin.match(/^(?:bot\s*([1-9])\s*[:,]?|([1-9])\s*:)\s*(\S[\s\S]*)$/i)
+  if (botKalip) {
+    botNo = Number(botKalip[1] || botKalip[2])
+    metin = botKalip[3]
+  }
   const kalip = metin.match(/^\/(komut|yaz)\s+(?:(?:komut|mesaj):\s*)?(\S[\s\S]*)$/i)
   if (kalip) {
     sohbet = kalip[1].toLowerCase() === 'yaz' && !kalip[2].startsWith('/')
@@ -1902,7 +2318,7 @@ async function odaMesaji(m) {
   }
   sira.bekleyen++
   sira.is = sira.is
-    .then(() => odaMesajiIsle(m, l.userId, metin, { sifreli, silindi, sohbet }))
+    .then(() => odaMesajiIsle(m, l.userId, metin, { sifreli, silindi, sohbet, botNo }))
     .catch((e) => console.error('Oda mesajı:', e))
     .finally(() => {
       sira.bekleyen--
@@ -1911,7 +2327,7 @@ async function odaMesaji(m) {
 }
 client.on(Events.MessageCreate, (m) => odaMesaji(m).catch((e) => console.error('Oda mesajı:', e)))
 
-async function odaMesajiIsle(m, uid, metin, { sifreli = false, silindi = false, sohbet = false } = {}) {
+async function odaMesajiIsle(m, uid, metin, { sifreli = false, silindi = false, sohbet = false, botNo = null } = {}) {
   // şifreli komutta cevap mesajı alıntılamaz (yanıt önizlemesinde şifre görünmesin)
   const yaz = (content) => {
     const govde = { content: content.length > 2000 ? content.slice(0, 1997) + '…' : content, allowedMentions: { parse: [] } }
@@ -1921,37 +2337,44 @@ async function odaMesajiIsle(m, uid, metin, { sifreli = false, silindi = false, 
   const sil = sifreli ? (silindi ? ' Şifre içerebileceği için mesajını sildim.' : ' Mesajını silemedim (izin yok): şifreyse kendin sil.') : ''
   const l = depo.bul(uid)
   if (!l || !depo.aktifMi(l)) return
-  if (!yonetici.calisiyor(uid)) return yaz('Botun çalışmıyor. Önce `/baslat` yaz.' + sil)
+  const hak = depo.botSayisi(l)
+  if (botNo !== null && botNo > hak) {
+    return yaz((hak > 1 ? `Lisansında ${hak} bot hakkı var (1-${hak}).` : 'Lisansında tek bot hakkı var.') + sil)
+  }
+  const n = botNo ?? varsayilanBot(l)
+  const bid = botKimligi(uid, n)
+  const et = botEtiketi(l, n)
+  if (!yonetici.calisiyor(bid)) return yaz(`${et}Botun çalışmıyor. Önce \`/baslat${n > 1 ? ` bot:${n}` : ''}\` yaz.` + sil)
 
   // "/yaz mesaj:selam" düz mesaj olarak geldiyse: oyun sohbetine yazılır
   if (sohbet) {
-    const r = await yonetici.istek(uid, 'yaz', { metin })
+    const r = await yonetici.istek(bid, 'yaz', { metin })
     if (r.kod !== 200) return yaz('Oyunda yazılamadı: ' + (r.veri?.hata || r.kod))
-    return yaz(`Oyunda yazıldı: ${metin}`)
+    return yaz(`${et}Oyunda yazıldı: ${metin}`)
   }
 
   // "/warp xanaxgod": oyunda komut
   if (metin.startsWith('/')) {
     const komut = oyunKomutu(metin)
-    const r = await oyundaCalistir(uid, komut)
+    const r = await oyundaCalistir(bid, komut)
     if (r.hata) return yaz(r.hata + sil)
     if (sifreli) return yaz('Komut oyunda yazıldı.' + sil)
-    return yaz(`🎮 Oyunda yazıldı: ${kodYaz(komut)}${l.sohbetKapali ? SOHBET_KAPALI_NOTU : ''}`)
+    return yaz(`${et}🎮 Oyunda yazıldı: ${kodYaz(komut)}${l.sohbetKapali ? SOHBET_KAPALI_NOTU : ''}`)
   }
 
   // "!maden", "!sandik ekle": oyun içi komut
   if (metin.startsWith('!')) {
-    const r = await yonetici.istek(uid, 'komut', { komut: metin.slice(1) })
-    if (r.kod === 400) return yaz('Bu komutu bilmiyorum. Şunlar var: `!odun` `!maden` `!tas` `!farm` `!topla` `!bosalt` `!sandik` `!gel` `!dur` `!durum` `!otonom`')
+    const r = await yonetici.istek(bid, 'komut', { komut: metin.slice(1) })
+    if (r.kod === 400) return yaz('Bu komutu bilmiyorum. Şunlar var: `!odun` `!maden` `!tas` `!farm` `!balik` `!xp` `!koru` `!yap` `!topla` `!bosalt` `!sandik` `!envanter` `!gel` `!dur` `!durum` `!otonom`')
     if (r.kod !== 200) return yaz('Bota ulaşamadım: ' + (r.veri?.hata || r.kod))
-    return yaz(`**Yaren:** ${r.veri.cevap}`)
+    return yaz(`${et}**Yaren:** ${r.veri.cevap}`)
   }
 
   // düz yazı: Yaren anlar (yapay zeka yoksa "odun kes", "maden kaz" gibi basit cümleler)
   if (depo.aiAktifMi(l) && AI_ANAHTAR) m.channel.sendTyping?.().catch(() => {})
-  const r = await yonetici.istek(uid, 'soyle', { metin: metin.slice(0, 500) }, 90000)
+  const r = await yonetici.istek(bid, 'soyle', { metin: metin.slice(0, 500) }, 90000)
   if (r.kod !== 200) return yaz('Yaren cevap veremedi: ' + (r.veri?.hata || r.kod))
-  return yaz(`**Yaren:** ${r.veri.cevap}`)
+  return yaz(`${et}**Yaren:** ${r.veri.cevap}`)
 }
 
 async function odam(i) {
@@ -1984,10 +2407,12 @@ async function bilgi(i) {
     `Bitiş: ${bitisDiscord(l)}`,
     `Yapay zeka: **${depo.aiAktifMi(l) && AI_ANAHTAR ? 'açık' : 'kapalı'}**` +
       (depo.aiAktifMi(l) && aiBitis !== l.bitis && aiBitis ? ` (bitiş: ${zaman(aiBitis, 'R')})` : ''),
-    `Bot: **${yonetici.calisiyor(l.userId) ? 'çalışıyor' : 'kapalı'}**`,
+    `Paket: **${depo.paketYazi(l)}**`,
+    `Bot: **${yonetici.kullaniciCalisiyor(l.userId) ? (depo.botSayisi(l) > 1 ? `${yonetici.kullaniciBotlari(l.userId).length}/${depo.botSayisi(l)} çalışıyor` : 'çalışıyor') : 'kapalı'}**`,
   ]
-  if (yonetici.calisiyor(l.userId)) {
-    const r = await yonetici.istek(l.userId, 'durum')
+  const calisan = yonetici.kullaniciBotlari(l.userId)[0]
+  if (calisan) {
+    const r = await yonetici.istek(calisan, 'durum')
     const k = r.veri?.ai_kullanim
     if (k && k.limit) satir.push(`Bugünkü yapay zeka kullanımı: **${k.gun === new Date().toLocaleDateString('sv-SE') ? k.sayi : 0}/${k.limit}**`)
   }
@@ -2125,38 +2550,50 @@ function keyLog(tur, baslik, alanlar) {
 // ---------- SATICI İŞLEMLERİ ----------
 // Hem slash komutları hem yönetim paneli bunları kullanır; hepsi cevap metni döndürür.
 const etiket = (u) => u?.tag || u?.username || u?.id
+// key tam paket ve tek botsa boş, değilse " [Sadece odun, 2 bot]"
+const keyPaketEk = (k) => (keyPaketi(k) === 'tam' && keyBotSayisi(k) === 1 ? '' : ` [${paketYazi([keyPaketi(k)], keyBotSayisi(k))}]`)
+// müşterinin bot durumu: 🟢 (2/3 çalışıyor) ya da ⚪
+function botDurumu(l) {
+  const calisan = yonetici.kullaniciBotlari(l.userId).length
+  const hak = depo.botSayisi(l)
+  return `${calisan ? '🟢' : '⚪'}${hak > 1 ? ` ${calisan}/${hak}` : ''}`
+}
 const durumYazi = (l) => (depo.aktifMi(l) ? 'aktif' : l.durum === 'iptal' ? 'iptal' : 'süresi dolmuş')
 
-function keyOlusturIslem(yapan, sure, adet, ai) {
-  const keyler = depo.olustur({ sure, adet, ai, olusturan: yapan.id, olusturanAdi: etiket(yapan) })
+// pk: { paket, botSayisi } (paketCoz)
+function keyOlusturIslem(yapan, sure, adet, ai, pk = paketCoz()) {
+  const keyler = depo.olustur({ sure, adet, ai, ...pk, olusturan: yapan.id, olusturanAdi: etiket(yapan) })
+  const paket = paketYazi([pk.paket], pk.botSayisi)
   keyLog('uret', `🆕 ${adet} key üretildi`, [
     ['Üreten', kim(yapan)],
     ['Süre', sureYazi(sure)],
+    ['Paket', paket],
     ['Yapay zeka', ai ? 'dahil' : 'yok'],
     ['Keyler', keyler.map((k) => `\`${k.slice(0, 10)}…\``).join('\n'), false],
   ])
-  adminLog(`🆕 ${etiket(yapan)}: ${adet} key üretti (${sureYazi(sure)}, AI ${ai ? 'var' : 'yok'}).`)
+  adminLog(`🆕 ${etiket(yapan)}: ${adet} key üretti (${sureYazi(sure)}, ${paket}, AI ${ai ? 'var' : 'yok'}).`)
   panelGuncelle()
   return (
-    `${adet} key (${sureYazi(sure)}, yapay zeka ${ai ? 'dahil' : 'yok'}). Süre, key girildiği an başlar:\n` +
+    `${adet} key (${sureYazi(sure)}, ${paket}, yapay zeka ${ai ? 'dahil' : 'yok'}). Süre, key girildiği an başlar:\n` +
     '```\n' + keyler.join('\n') + '\n```\n' +
     '⚠️ Keyler bir daha gösterilmez (sadece özeti saklanır), şimdi kopyala.'
   )
 }
 
 // Key üretip kişiye DM ile gönderir; DM'leri kapalıysa keyi satıcıya gösterir
-async function keyVerIslem(yapan, u, sure, ai) {
+async function keyVerIslem(yapan, u, sure, ai, pk = paketCoz()) {
   if (u.bot) return 'Botlara key verilmez.'
   if (depo.bul(u.id)?.durum === 'iptal') {
     return 'Bu kişinin lisansı iptal edilmiş; key giremez. Önce süre uzatarak iptali kaldır.'
   }
-  const [key] = depo.olustur({ sure, ai, direkt: true, alici: u.id, olusturan: yapan.id, olusturanAdi: etiket(yapan) })
+  const [key] = depo.olustur({ sure, ai, ...pk, direkt: true, alici: u.id, olusturan: yapan.id, olusturanAdi: etiket(yapan) })
   const onek = `\`${key.slice(0, 10)}…\``
+  const paket = paketYazi([pk.paket], pk.botSayisi)
   const kanal = paneller.keyKanalId ? ` (<#${paneller.keyKanalId}>)` : ''
   const gitti = await dmGonder(
     u.id,
     [
-      `Merhaba! Sana **${sureYazi(sure)}** Yaren lisans keyi tanımlandı${ai ? ' (yapay zeka dahil)' : ''}:`,
+      `Merhaba! Sana **${sureYazi(sure)}** Yaren lisans keyi tanımlandı (${paket}${ai ? ', yapay zeka dahil' : ''}):`,
       '```\n' + key + '\n```',
       mesajOkunur
         ? `Sunucudaki key kanalına${kanal} bu keyi yaz ya da **Key Gir** butonuna bas.`
@@ -2169,26 +2606,29 @@ async function keyVerIslem(yapan, u, sure, ai) {
     kayit.dmGitti = gitti // key geçmişinde "DM ile" mi "satıcı iletti" mi doğru görünsün
     depo.kaydet()
   }
-  adminLog(`🎁 ${etiket(yapan)} → ${etiket(u)}: ${sureYazi(sure)} key ${onek} ${gitti ? 'DM ile gönderildi' : 'üretildi (DM kapalı)'}.`)
+  adminLog(`🎁 ${etiket(yapan)} → ${etiket(u)}: ${sureYazi(sure)} key (${paket}) ${onek} ${gitti ? 'DM ile gönderildi' : 'üretildi (DM kapalı)'}.`)
   keyLog('ver', '🎁 Key verildi', [
     ['Veren', kim(yapan)],
     ['Alan', kim(u)],
     ['Key', onek],
     ['Süre', sureYazi(sure)],
+    ['Paket', paket],
     ['Yapay zeka', ai ? 'dahil' : 'yok'],
     ['DM', gitti ? 'gönderildi' : "kapalı, key satıcıya gösterildi"],
   ])
   panelGuncelle()
   return gitti
-    ? `<@${u.id}> kişisine **${sureYazi(sure)}** key (${onek}) DM ile gönderildi. Keyi girdiği an odası açılacak.\nVazgeçersen: Key İptal → ${key.slice(0, 10)}`
+    ? `<@${u.id}> kişisine **${sureYazi(sure)}** key (${paket}, ${onek}) DM ile gönderildi. Keyi girdiği an odası açılacak.\nVazgeçersen: Key İptal → ${key.slice(0, 10)}`
     : `<@${u.id}> kişisinin DM'leri kapalı, keyi sen ilet:\n\`\`\`\n${key}\n\`\`\`\n⚠️ Bir daha gösterilmez, şimdi kopyala.`
 }
 
 async function lisansUzatIslem(guild, yapan, u, sure) {
   if (!depo.bul(u.id)) return 'Bu kullanıcının lisansı yok. Ona key ver.'
   const oncekiAi = depo.aiAktifMi(depo.bul(u.id))
+  const oncekiImza = depo.paketImzasi(depo.bul(u.id))
   const l = depo.uzat(u.id, sure)
   aiDegistiyse(l, oncekiAi)
+  paketDegistiyse(l, oncekiImza)
   panelGuncelle()
   // süresi bitip odası silindiyse yeniden açılır. Müşteri o an key girip /odam
   // yazıyorsa oda onun işleminde açılır (aynı anda iki oda açılmasın)
@@ -2232,10 +2672,9 @@ async function lisansKapatIslem(yapan, u, nasil) {
   }
 }
 async function lisansKapat(yapan, u, nasil) {
-  denemeIptal(u.id)
   if (nasil === 'iptal') depo.iptalEt(u.id)
   else depo.bitir(u.id)
-  yonetici.durdur(u.id)
+  botlariKapat(u.id)
   panelGuncelle()
   const iptal = nasil === 'iptal'
   const ne = iptal ? 'lisansın satıcı tarafından iptal edildi' : 'lisansının süresi satıcı tarafından bitirildi'
@@ -2298,7 +2737,7 @@ function keyListeMetni() {
   const son = keyler.slice(-50).reverse()
   const satirlar = son.map(
     (k) =>
-      `\`${k.onek}…\` ${sureYazi(keySuresi(k))}${k.ai ? '' : ' (AI yok)'}${k.direkt ? (k.alici ? ` (DM → <@${k.alici}>)` : ' (DM)') : ''} — ` +
+      `\`${k.onek}…\` ${sureYazi(keySuresi(k))}${keyPaketEk(k)}${k.ai ? '' : ' (AI yok)'}${k.direkt ? (k.alici ? ` (DM → <@${k.alici}>)` : ' (DM)') : ''} — ` +
       (k.durum === 'kullanildi' ? `kullanıldı: <@${k.kullanan}>` : k.durum === 'iptal' ? 'iptal' : '**boşta**')
   )
   return satirlar.length
@@ -2313,7 +2752,8 @@ function lisansListeMetni() {
   const satirlar = sirali.map(
     (l) =>
       `<@${l.userId}> — ${depo.aktifMi(l) ? 'aktif' : l.durum === 'iptal' ? 'iptal' : 'bitti'}, ` +
-      `${l.bitis === null ? 'süresiz' : (depo.aktifMi(l) ? 'bitiş ' : 'bitti ') + zaman(l.bitis, 'R')}, bot ${yonetici.calisiyor(l.userId) ? '🟢' : '⚪'}` +
+      `${l.bitis === null ? 'süresiz' : (depo.aktifMi(l) ? 'bitiş ' : 'bitti ') + zaman(l.bitis, 'R')}, bot ${botDurumu(l)}` +
+      (depo.aktifMi(l) && depo.paketImzasi(l) !== 'tam|1' ? ` (${depo.paketYazi(l)})` : '') +
       (l.kanalId ? ` <#${l.kanalId}>` : '')
   )
   const aktif = lisanslar.filter((l) => depo.aktifMi(l)).length
@@ -2330,7 +2770,9 @@ function kisiBilgiMetni(userId) {
     `<@${userId}> (${l.kullaniciAdi})`,
     `Lisans: **${durumYazi(l)}** | Bitiş: ${bitisDiscord(l)}`,
     `Yapay zeka: **${aiAcik ? 'açık' : 'kapalı'}**` + (aiAcik && aiBitis && aiBitis !== l.bitis ? ` (bitiş: ${zaman(aiBitis, 'R')})` : ''),
-    `Bot: **${yonetici.calisiyor(userId) ? 'çalışıyor' : 'kapalı'}**` + (l.son?.host ? ` (son sunucu: ${l.son.host}:${l.son.port})` : ''),
+    `Paket: **${depo.paketYazi(l)}**`,
+    `Bot: **${yonetici.kullaniciCalisiyor(userId) ? `çalışıyor (${yonetici.kullaniciBotlari(userId).length})` : 'kapalı'}**` +
+      (l.son?.host ? ` (son sunucu: ${l.son.host}:${l.son.port})` : ''),
     `Oyundaki sahip: ${l.son?.owner ? `**${l.son.owner}**` : 'yok'}`,
     `Oda: ${l.kanalId ? `<#${l.kanalId}>` : 'yok'}`,
     `Kullandığı keyler (${(l.keyler || []).length}): ${(l.keyler || []).length > 20 ? '… ' : ''}${(l.keyler || []).slice(-20).map((k) => `\`${k}…\``).join(', ') || '-'}`,
@@ -2350,14 +2792,17 @@ async function saticiKomutu(i) {
     if (s.hata) return i.reply(gizli(s.hata))
     const adet = i.options.getInteger('adet') ?? 1
     const ai = i.options.getBoolean('ai') ?? true
-    return i.reply(gizli(keyOlusturIslem(i.user, s.sure, adet, ai)))
+    return i.reply(gizli(keyOlusturIslem(i.user, s.sure, adet, ai, paketCoz(i.options.getString('paket')))))
   }
 
   if (i.commandName === 'key-ver') {
     const s = sureOku(i)
     if (s.hata) return i.reply(gizli(s.hata))
     await i.deferReply({ flags: MessageFlags.Ephemeral })
-    return i.editReply({ content: await keyVerIslem(i.user, i.options.getUser('kullanici'), s.sure, i.options.getBoolean('ai') ?? true), ...sessiz })
+    return i.editReply({
+      content: await keyVerIslem(i.user, i.options.getUser('kullanici'), s.sure, i.options.getBoolean('ai') ?? true, paketCoz(i.options.getString('paket'))),
+      ...sessiz,
+    })
   }
 
   if (i.commandName === 'key-liste') return i.reply({ ...gizli(keyListeMetni()), ...sessiz })
@@ -2597,8 +3042,9 @@ function yonetimEmbed() {
   const sirali = [...aktif].sort((a, b) => (a.bitis ?? Infinity) - (b.bitis ?? Infinity))
   const satirlar = sirali.map(
     (l) =>
-      `${yonetici.calisiyor(l.userId) ? '🟢' : '⚪'} <@${l.userId}> — ` +
+      `${botDurumu(l)} <@${l.userId}> — ` +
       (l.bitis === null ? 'süresiz' : `bitiş ${zaman(l.bitis, 'R')}`) +
+      (depo.paketImzasi(l, simdi) !== 'tam|1' ? ` (${depo.paketYazi(l, simdi)})` : '') +
       (l.kanalId ? ` <#${l.kanalId}>` : '')
   )
   const ust = [
@@ -2749,6 +3195,12 @@ const aiSec = (l) =>
     .setStringSelectMenuComponent((s) =>
       s.setCustomId('ai').addOptions({ label: 'Evet', value: 'evet', default: true }, { label: 'Hayır', value: 'hayir' })
     )
+const paketSec = (l) =>
+  l
+    .setLabel('Paket ve bot sayısı')
+    .setStringSelectMenuComponent((s) =>
+      s.setCustomId('paket').addOptions(...PAKET_SECIMLERI.map((v, k) => ({ label: paketSecimAdi(v), value: v, default: k === 0 })))
+    )
 const adetYaz = (l) =>
   l
     .setLabel('Kaç key? (1-25)')
@@ -2760,8 +3212,8 @@ const form = (id, baslik, ...parcalar) =>
     .addLabelComponents(...parcalar)
 
 const FORMLAR = {
-  ver: () => form('ver', 'Key Ver (DM ile gider)', kisiSec, birimSec, miktarYaz, aiSec),
-  olustur: () => form('olustur', 'Key Oluştur', birimSec, miktarYaz, adetYaz, aiSec),
+  ver: () => form('ver', 'Key Ver (DM ile gider)', kisiSec, birimSec, miktarYaz, aiSec, paketSec),
+  olustur: () => form('olustur', 'Key Oluştur', birimSec, miktarYaz, adetYaz, aiSec, paketSec),
   uzat: () => form('uzat', 'Süre Uzat', kisiSec, birimSec, miktarYaz),
   bitir: () =>
     form('bitir', 'Lisans Bitir', kisiSec, (l) =>
@@ -2825,13 +3277,20 @@ async function yonetimEtkilesim(i) {
   const kisi = () => f.getSelectedUsers('kisi')?.first() ?? null
   const sure = () => sureCoz(f.getStringSelectValues('birim')[0], sayiAl(f.getTextInputValue('miktar')))
   const ai = () => (f.getStringSelectValues('ai')[0] ?? 'evet') === 'evet'
+  const pk = () => {
+    try {
+      return paketCoz(f.getStringSelectValues('paket')[0])
+    } catch (_) {
+      return paketCoz() // eski panelden gelen form: tam paket
+    }
+  }
 
   if (ne === 'olustur') {
     const s = sure()
     if (s.hata) return i.reply(gizli(s.hata))
     const adet = sayiAl(f.getTextInputValue('adet')) ?? 1
     if (!Number.isInteger(adet) || adet < 1 || adet > 25) return i.reply(gizli('Key sayısı 1 ile 25 arasında olmalı.'))
-    return i.reply(gizli(keyOlusturIslem(i.user, s.sure, adet, ai())))
+    return i.reply(gizli(keyOlusturIslem(i.user, s.sure, adet, ai(), pk())))
   }
   if (ne === 'keyiptal') return i.reply(gizli(keyIptalIslem(i.user, f.getTextInputValue('key'))))
   if (ne === 'keysorgu') return i.reply({ ...gizli(keySorguMetni(f.getTextInputValue('key'))), ...sessiz })
@@ -2859,7 +3318,7 @@ async function yonetimEtkilesim(i) {
   const s = sure()
   if (s.hata) return i.reply(gizli(s.hata))
   await i.deferReply({ flags: MessageFlags.Ephemeral })
-  if (ne === 'ver') return i.editReply({ content: await keyVerIslem(i.user, u, s.sure, ai()), ...sessiz })
+  if (ne === 'ver') return i.editReply({ content: await keyVerIslem(i.user, u, s.sure, ai(), pk()), ...sessiz })
   if (ne === 'uzat') return i.editReply({ content: await lisansUzatIslem(i.guild, i.user, u, s.sure), ...sessiz })
 }
 
@@ -2882,14 +3341,17 @@ async function odayaBildir(l, content, kilit) {
 }
 
 async function zamanKontrol() {
-  const { dolan, yaklasan, sonSaat, aiDolan } = depo.zamanKontrol()
-  if (dolan.length || aiDolan.length) panelGuncelle()
+  const { dolan, yaklasan, sonSaat, aiDolan, paketDegisen = [] } = depo.zamanKontrol()
+  if (dolan.length || aiDolan.length || paketDegisen.length) panelGuncelle()
+  for (const l of paketDegisen) {
+    // ör. tam paket bitti, "sadece odun" sürüyor; ya da 2. botun hakkı bitti
+    adminLog(`📦 ${l.kullaniciAdi} (${l.userId}) paketi değişti: ${depo.paketYazi(l)}.`)
+    paketDegistiyse(l, null)
+    await odayaBildir(l, `<@${l.userId}> 📦 paketindeki bir sürenin bitti. Şu an: **${depo.paketYazi(l)}**. Yükseltmek için satıcıyla görüşebilirsin.`)
+  }
   for (const l of aiDolan) {
     adminLog(`🤖 ${l.kullaniciAdi} (${l.userId}) yapay zeka süresi doldu.`)
-    if (yonetici.calisiyor(l.userId)) {
-      yenidenBaslat.add(l.userId) // yapay zekasız olarak hemen geri gelir
-      yonetici.durdur(l.userId)
-    }
+    botlariYenile(l) // yapay zekasız olarak hemen geri gelir
     await odayaBildir(
       l,
       `<@${l.userId}> yapay zeka süren doldu; botun yapay zekasız devam ediyor (\`!komutlar\` ve /gorev çalışır). Yapay zekalı key girersen tekrar açılır.`
@@ -2898,8 +3360,7 @@ async function zamanKontrol() {
   for (const l of dolan) {
     // önceki odalar silinirken bu kişi yeni key girmiş olabilir
     if (depo.aktifMi(depo.bul(l.userId))) continue
-    denemeIptal(l.userId)
-    yonetici.durdur(l.userId)
+    botlariKapat(l.userId)
     adminLog(`⌛ ${l.kullaniciAdi} (${l.userId}) lisansı doldu.`)
     musteriRolu(l.userId, false)
     keyLog('lisans', '⌛ Lisans süresi doldu', [
@@ -2938,10 +3399,17 @@ async function zamanKontrol() {
   }
   // Güvenlik ağı: lisansı bitmiş/iptal edilmiş ama bir şekilde çalışan bot kalmasın
   for (const l of depo.ozetListe().lisanslar) {
-    if (yonetici.calisiyor(l.userId) && !depo.aktifMi(l)) {
-      denemeIptal(l.userId)
-      yonetici.durdur(l.userId)
+    if (yonetici.kullaniciCalisiyor(l.userId) && !depo.aktifMi(l)) {
+      denemeleriIptal(l.userId)
+      yonetici.kullaniciyiDurdur(l.userId)
       adminLog(`⏹️ ${l.kullaniciAdi} lisansı kapalı olduğu halde çalışan botu durduruldu.`)
+      continue
+    }
+    // bot hakkından fazla çalışan (ör. ek bot süresi bitti) kalmasın
+    for (const id of yonetici.kullaniciBotlari(l.userId)) {
+      if (botuCoz(id).n <= depo.botSayisi(l)) continue
+      denemeIptal(id)
+      yonetici.durdur(id)
     }
   }
 }

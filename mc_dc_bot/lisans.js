@@ -6,6 +6,11 @@
 //
 // Bir kullanıcının tek lisansı olur. Lisansı varken yeni key girerse süresi
 // uzar (yenileme). Süresi dolmuşsa yeni key lisansı tekrar açar.
+//
+// Paketler: key "tam" (her iş) ya da sadece odun / maden / farm olabilir ve 1-3
+// bot hakkı verir. Her paketin ve her ek bot yerinin kendi bitişi vardır (yapay
+// zeka gibi): ucuz bir "sadece odun" keyi, pahalı tam paketin süresini uzatmaz.
+// Lisansın bitişi, paketlerden en geç bitenidir.
 
 const crypto = require('crypto')
 const fs = require('fs')
@@ -18,6 +23,24 @@ const GUN = 24 * SAAT
 const keySuresi = (k) => (k.sure !== undefined ? k.sure : (k.gun || 0) * GUN)
 // Birbirine benzeyen harfler yok (0/O, 1/I/L): müşteri elle yazarken karıştırmasın
 const ALFABE = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+
+// Paketler (gorevbot.js'deki PAKET_GOREVLERI ile aynı adlar)
+const PAKETLER = {
+  tam: 'Tam paket',
+  odun: 'Sadece odun',
+  maden: 'Sadece maden',
+  farm: 'Sadece farm (tarla, balık, XP)',
+}
+const MAX_BOT = 3
+const paketAdi = (p) => PAKETLER[p] || PAKETLER.tam
+// "tam, 2 bot" gibi
+const paketYazi = (paketler, botSayisi = 1) =>
+  (paketler.includes('tam') || !paketler.length ? PAKETLER.tam : paketler.map(paketAdi).join(' + ')) +
+  (botSayisi > 1 ? `, ${botSayisi} bot` : '')
+const keyPaketi = (k) => (PAKETLER[k?.paket] ? k.paket : 'tam')
+const keyBotSayisi = (k) => Math.min(MAX_BOT, Math.max(1, Number(k?.botSayisi) || 1))
+// bitiş (ms | null = süresiz) şu an açık mı
+const acikMi = (b, simdi) => b === null || (typeof b === 'number' && b > simdi)
 
 const temizle = (key) => String(key || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 const ozet = (key) => crypto.createHash('sha256').update(temizle(key)).digest('hex')
@@ -103,7 +126,8 @@ class LisansDeposu {
   // sure: milisaniye (0 = süresiz); eski kullanım için gun de olur.
   // Açık keyleri döndürür (bir daha gösterilemez).
   // olusturan: keyi üreten satıcı/yetkili (id ve adı, key geçmişi için)
-  olustur({ sure, gun, adet = 1, ai = true, direkt = false, alici = null, olusturan = null, olusturanAdi = null, simdi = Date.now() } = {}) {
+  // paket: tam | odun | maden | farm, botSayisi: 1-3
+  olustur({ sure, gun, adet = 1, ai = true, paket = 'tam', botSayisi = 1, direkt = false, alici = null, olusturan = null, olusturanAdi = null, simdi = Date.now() } = {}) {
     if (sure === undefined) sure = (gun ?? 30) * GUN
     const yeni = []
     for (let i = 0; i < adet; i++) {
@@ -117,6 +141,8 @@ class LisansDeposu {
         direkt, // satıcı /key-ver ile doğrudan verdi
         alici, // kime verildi (Key Ver), iptal etmek gerekirse bulunsun
         ai: !!ai,
+        paket: keyPaketi({ paket }),
+        botSayisi: keyBotSayisi({ botSayisi }),
         olusturan,
         olusturanAdi,
         olusturma: simdi,
@@ -180,6 +206,45 @@ class LisansDeposu {
     return b === null || b > simdi
   }
 
+  // Şu an açık paketler: ['tam'] ya da ['odun', 'maden']. Eski lisanslar tam pakettir.
+  paketleri(l, simdi = Date.now()) {
+    if (!this.aktifMi(l, simdi)) return []
+    if (!l.paketBitis) return ['tam']
+    const acik = Object.keys(PAKETLER).filter((p) => acikMi(l.paketBitis[p], simdi))
+    return acik.includes('tam') ? ['tam'] : acik
+  }
+
+  // Aynı anda kaç bot çalıştırabilir (lisans kapalıysa 0)
+  botSayisi(l, simdi = Date.now()) {
+    if (!this.aktifMi(l, simdi)) return 0
+    const ek = Object.values(l.botBitis || {}).filter((b) => acikMi(b, simdi)).length
+    return Math.min(MAX_BOT, 1 + ek)
+  }
+
+  paketYazi(l, simdi = Date.now()) {
+    if (!l) return '-'
+    if (!this.aktifMi(l, simdi)) return paketYazi(l.paketBitis ? Object.keys(l.paketBitis) : ['tam'], 1)
+    return paketYazi(this.paketleri(l, simdi), this.botSayisi(l, simdi))
+  }
+
+  // paket/bot sayısı değişti mi anlamak için
+  paketImzasi(l, simdi = Date.now()) {
+    return `${this.paketleri(l, simdi).join(',')}|${this.botSayisi(l, simdi)}`
+  }
+
+  // Lisansın bitişi: en geç biten paket
+  _bitisHesapla(l) {
+    const hepsi = Object.values(l.paketBitis)
+    if (!hepsi.length) return
+    l.bitis = hepsi.some((b) => b === null) ? null : Math.max(...hepsi)
+  }
+
+  // Eski kayıt (paketsiz): tam paket, lisansla aynı süre
+  _paketHazirla(l) {
+    if (!l.paketBitis) l.paketBitis = { tam: l.bitis }
+    if (!l.botBitis) l.botBitis = {}
+  }
+
   bul(userId) {
     return this.veri.lisanslar[userId] || null
   }
@@ -207,6 +272,8 @@ class LisansDeposu {
     }
 
     const sure = keySuresi(k)
+    const paket = keyPaketi(k)
+    const botSayisi = keyBotSayisi(k)
     // Keyi hemen "kullanıldı" yap: iki kere hızlı basılırsa ikinci kez kullanılmasın
     k.durum = 'kullanildi'
     k.kullanan = userId
@@ -226,6 +293,8 @@ class LisansDeposu {
         aiBitis: k.ai && sure > 0 ? simdi + sure : k.ai ? null : 0,
         aiBittiBildirildi: false,
         olusturma: simdi,
+        paketBitis: { [paket]: sure > 0 ? simdi + sure : null },
+        botBitis: Object.fromEntries(Array.from({ length: botSayisi - 1 }, (_, i) => [i + 2, sure > 0 ? simdi + sure : null])),
         keyler: [k.onek],
         son: null, // son /baslat ayarları
         calisiyordu: false, // bot kapanınca (yeniden başlatma) otomatik açılsın mı
@@ -239,11 +308,18 @@ class LisansDeposu {
       // yapay zeka durumu lisans süresi değişmeden önce okunur
       const aiAcik = this.aiAktifMi(l, simdi)
       const eskiAiBitis = l.aiBitis === undefined ? l.bitis : l.aiBitis
-      if (sure === 0) l.bitis = null
-      else if (l.bitis !== null || tip === 'yeniden') {
-        const taban = tip === 'uzatildi' && l.bitis !== null ? l.bitis : simdi
-        l.bitis = taban + sure
+      // Keyin paketi ve bot yerleri kendi sürelerinden uzar; kapanmış olanlar şimdiden başlar.
+      // Lisans kapalıyken kalmış "süresiz" kayıt (eski iptal/bitti) süresiz açılmasın.
+      this._paketHazirla(l)
+      const ekle = (b) => (sure === 0 ? null : b === null && tip === 'uzatildi' ? null : Math.max(typeof b === 'number' ? b : 0, simdi) + sure)
+      l.paketBitis[paket] = ekle(l.paketBitis[paket])
+      for (let n = 2; n <= botSayisi; n++) l.botBitis[n] = ekle(l.botBitis[n])
+      if (tip === 'yeniden') {
+        // eski paketlerden süresi kalmış görünen (süresiz) olanlar kapanmış sayılır
+        for (const p of Object.keys(l.paketBitis)) if (p !== paket && l.paketBitis[p] === null) l.paketBitis[p] = simdi
+        for (const n of Object.keys(l.botBitis)) if (Number(n) > botSayisi && l.botBitis[n] === null) l.botBitis[n] = simdi
       }
+      this._bitisHesapla(l)
       if (k.ai) {
         if (sure === 0) l.aiBitis = null
         else if (!aiAcik) l.aiBitis = simdi + sure
@@ -257,6 +333,7 @@ class LisansDeposu {
       l.saatUyarildi = l.bitis !== null && l.bitis - simdi <= SAAT
       l.keyler.push(k.onek)
     }
+    l.paketImza = this.paketImzasi(l, simdi)
     this.kaydet()
     const ne = { yeni: 'Lisansın açıldı', uzatildi: 'Lisansın uzatıldı', yeniden: 'Lisansın yeniden açıldı' }[tip]
     return { tip, lisans: l, kayit: k, mesaj: `${ne}. Bitiş: ${bitisYazi(l)}.` }
@@ -284,8 +361,21 @@ class LisansDeposu {
     // önceki durumu değiştirmeden önce oku
     const aiAcik = this.aiAktifMi(l, simdi)
     const eskiAi = l.aiBitis === undefined ? l.bitis : l.aiBitis
-    if (sure === 0) l.bitis = null
-    else if (l.bitis !== null || !this.aktifMi(l, simdi)) {
+    const lisansAcik = this.aktifMi(l, simdi)
+    if (l.paketBitis) {
+      // Lisans bittiği an açık olan paketler ve bot yerleri uzar (sonradan kapanmış
+      // ucuz paket geri gelmez); süresiz olan süresiz kalır.
+      this._paketHazirla(l)
+      const son = lisansAcik ? simdi : Math.min(l.bitis ?? simdi, simdi)
+      const sayilir = (b) => b === null || (typeof b === 'number' && b >= son)
+      const uzat = (b) => (sure === 0 || (b === null && lisansAcik) ? null : Math.max(b ?? simdi, simdi) + sure)
+      let paketler = Object.keys(l.paketBitis).filter((p) => sayilir(l.paketBitis[p]))
+      if (!paketler.length) paketler = Object.keys(l.paketBitis)
+      for (const p of paketler) l.paketBitis[p] = uzat(l.paketBitis[p])
+      for (const n of Object.keys(l.botBitis)) if (sayilir(l.botBitis[n])) l.botBitis[n] = uzat(l.botBitis[n])
+      this._bitisHesapla(l)
+    } else if (sure === 0) l.bitis = null
+    else if (l.bitis !== null || !lisansAcik) {
       // süresiz lisans süresiz kalır; süreli olana (ya da kapanmış olana) süre eklenir
       l.bitis = Math.max(l.bitis ?? simdi, simdi) + sure
     }
@@ -300,6 +390,7 @@ class LisansDeposu {
     l.aiBittiBildirildi = !this.aiAktifMi(l, simdi) && l.aiBittiBildirildi
     l.uyarildi = l.bitis !== null && l.bitis - simdi <= GUN
     l.saatUyarildi = l.bitis !== null && l.bitis - simdi <= SAAT
+    l.paketImza = this.paketImzasi(l, simdi)
     this.kaydet()
     return l
   }
@@ -318,6 +409,11 @@ class LisansDeposu {
     // süresiz yapay zeka da biter; yeni AI'sız keyle geri gelmesin
     const ai = l.aiBitis === undefined ? null : l.aiBitis
     if (ai === null || ai > simdi) l.aiBitis = simdi
+    // paketler ve bot yerleri de biter (yeni keyle süresiz geri gelmesin)
+    for (const tablo of [l.paketBitis, l.botBitis]) {
+      if (!tablo) continue
+      for (const [ad, b] of Object.entries(tablo)) if (b === null || b > simdi) tablo[ad] = simdi
+    }
     this.kaydet()
     return l
   }
@@ -329,11 +425,21 @@ class LisansDeposu {
     const yaklasan = [] // 1 günden az kaldı
     const sonSaat = [] // 1 saatten az kaldı
     const aiDolan = []
+    const paketDegisen = [] // lisans sürerken bir paketi ya da ek bot yeri bitti
+    let degisti = false
     for (const l of Object.values(this.veri.lisanslar)) {
       if (l.durum !== 'aktif') continue
       if (this.aktifMi(l, simdi) && l.ai && !this.aiAktifMi(l, simdi) && !l.aiBittiBildirildi) {
         l.aiBittiBildirildi = true
         aiDolan.push(l)
+      }
+      if (this.aktifMi(l, simdi)) {
+        const imza = this.paketImzasi(l, simdi)
+        if (l.paketImza !== imza) {
+          if (l.paketImza !== undefined) paketDegisen.push(l)
+          l.paketImza = imza
+          degisti = true
+        }
       }
       if (l.bitis === null) continue
       if (l.bitis <= simdi) {
@@ -349,8 +455,8 @@ class LisansDeposu {
         yaklasan.push(l)
       }
     }
-    if (dolan.length || yaklasan.length || sonSaat.length || aiDolan.length) this.kaydet()
-    return { dolan, yaklasan, sonSaat, aiDolan }
+    if (degisti || dolan.length || yaklasan.length || sonSaat.length || aiDolan.length) this.kaydet()
+    return { dolan, yaklasan, sonSaat, aiDolan, paketDegisen }
   }
 
   ozetListe() {
@@ -381,4 +487,20 @@ function sureYazi(ms) {
   return saat >= 24 ? `${Math.floor(saat / 24)} gün ${saat % 24} saat` : `${saat} saat`
 }
 
-module.exports = { LisansDeposu, keyUret, temizle, ozet, bitisYazi, sureYazi, keySuresi, GUN, SAAT }
+module.exports = {
+  LisansDeposu,
+  keyUret,
+  temizle,
+  ozet,
+  bitisYazi,
+  sureYazi,
+  keySuresi,
+  keyPaketi,
+  keyBotSayisi,
+  paketYazi,
+  paketAdi,
+  PAKETLER,
+  MAX_BOT,
+  GUN,
+  SAAT,
+}

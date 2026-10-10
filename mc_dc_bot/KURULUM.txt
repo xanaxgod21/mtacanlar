@@ -106,6 +106,8 @@ DENE
     "Süre birimi" listesinden "saat"i seç, "Kaç saat / gün / hafta / ay?"
     kutusuna 1 yaz, diğerlerine dokunma, "Gönder"e bas. Key sadece senin
     gördüğün bir mesajda çıkar: HEMEN KOPYALA, bir daha gösterilmez.
+    (Formdaki "Paket ve bot sayısı" ile ucuz paket satabilirsin: sadece
+    odun / maden / farm, ya da bir keyle 2-3 bot. Boş bırakırsan tam paket, 1 bot.)
  b. Başka bir hesapla (ya da kendinle) #key-gir kanalına keyi yaz.
     Yazdığın mesaj hemen silinir (key başkası görmesin diye). Bot
     "✅ Lisansın açıldı. Bitiş: ... Odan: #yaren-..." diye cevap verir
@@ -119,6 +121,8 @@ DENE
     yazar; odaya direkt "/warp xanaxgod" yazman da olur).
     Oyunda da yönetmek istersen:  /sahip ad:OyundakiAdın  sonra oyunda "!odun",
     "!maden", "!gel" yaz (başında ! olmalı). Bot oyunda sadece o ismi dinler.
+    Üstündekiler: /envanter   Bugün ne yaptı: /rapor (her gece kendisi de atar).
+    Bot ölünce ya da sunucudan atılınca odada seni etiketler.
 
 Siyah pencere açık kaldığı sürece bot çalışır; bilgisayar kapanınca bot da
 kapanır. 7/24 için VPS gerekir (bkz. OKUBENI.md).

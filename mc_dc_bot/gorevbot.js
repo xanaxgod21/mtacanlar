@@ -498,7 +498,8 @@ async function kaz(block) {
     await savas.bekle()
     if (taskId !== tid) throw new Error('görev değişti')
     const b = bot.blockAt(block.position)
-    if (!b || b.boundingBox === 'empty' || b.name !== ad) return // bu arada kırılmış / değişmiş
+    // bu arada kırılmış / değişmiş (ekinlerin çarpışma kutusu yok: boş kutu kırılmış demek değil)
+    if (!b || b.name !== ad) return
     const s = savas.seq()
     try {
       // sunucu cevap vermezse (blok uzakta, eklenti engelledi) sonsuza kadar beklemesin
@@ -519,7 +520,7 @@ async function kaz(block) {
   await sleep(150)
   const sonra = bot.blockAt(block.position)
   // çakıl/kum kırılınca üstündeki düşüp yerine geçer: o koruma sayılmaz
-  if (sonra && sonra.name === ad && sonra.boundingBox !== 'empty' && !/gravel|sand$|concrete_powder/.test(ad)) {
+  if (sonra && sonra.name === ad && !/gravel|sand$|concrete_powder/.test(ad)) {
     korumaliSayac++
     if (korumaliSayac >= 3) uyar('korumali', 'Burada kazmama izin yok (korumalı alan / arsa olabilir). Beni başka bir yere götür.', 10 * 60000)
     throw new Error('blok kırılmadı (korumalı alan olabilir)')
@@ -2069,7 +2070,8 @@ function kazmaYeter(b) {
   return !!kazma && !!b.harvestTools[kazma.type]
 }
 
-function cevherBul(skipped, enFazla = null) {
+// secici: (blok) => bool, ör. inerken sadece değerliler
+function cevherBul(skipped, enFazla = null, secici = null) {
   if (!cevherIdleri) {
     cevherIdleri = Object.values(bot.registry.blocksByName).filter((b) => cevherMi(b)).map((b) => b.id)
   }
@@ -2083,6 +2085,7 @@ function cevherBul(skipped, enFazla = null) {
     if (p.x === ayak.x && p.z === ayak.z && p.y < ayak.y) continue // tam ayağının altı: düşer
     const b = bot.blockAt(p)
     if (!b || lavYakin(p)) continue
+    if (secici && !secici(b)) continue
     if (!kazmaYeter(b)) {
       yetmeyen++
       continue
@@ -2166,6 +2169,16 @@ const MADEN_HEDEFLERI = {
   komur: { y: [null, null] },
 }
 const KATMAN = ['netherite', 'diamond', 'iron', 'stone', 'golden', 'wooden']
+// Hedef cevherin blok adındaki kelime
+const HEDEF_CEVHER = { elmas: 'diamond', kiziltas: 'redstone', altin: 'gold', zumrut: 'emerald', lapis: 'lapis', demir: 'iron', bakir: 'copper', komur: 'coal' }
+// İnerken her kömür/bakır için durmasın (çok yavaşlar): sadece değerliler, kazması
+// demirden kötüyse demir (eritip kazma yapar) ve hedefin kendisi
+const DEGERLI_CEVHER = /diamond|emerald|gold|redstone|lapis|ancient_debris/
+function inerkenAlinir(b, hedef) {
+  if (DEGERLI_CEVHER.test(b.name)) return true
+  if (HEDEF_CEVHER[hedef] && b.name.includes(HEDEF_CEVHER[hedef])) return true
+  return b.name.includes('iron') && kazmaKatmani() > KATMAN.indexOf('iron')
+}
 const kazmaKatmani = () => {
   const k = iyiAlet('pickaxe') || bot.inventory.items().find((i) => aletTuru(i) === 'pickaxe')
   return k ? KATMAN.findIndex((m) => k.name.startsWith(m + '_')) : 99
@@ -2211,7 +2224,7 @@ async function madenTask(id, secenek = {}) {
         if (kazmaKatmani() > KATMAN.indexOf('iron') && zanaat.yukseltilebilir('pickaxe')) await demirKazmaYap()
       }
 
-      const { pos, yetmeyen } = cevherBul(skipped, iniyor ? 5 : null)
+      const { pos, yetmeyen } = cevherBul(skipped, iniyor ? 4 : null, iniyor ? (b) => inerkenAlinir(b, secenek.hedef) : null)
       hedef = pos
       if (yetmeyen) uyar('kazma-yetmez', 'Yakında kazmamın yetmediği cevherler var (elmas, altın için en az demir kazma lazım).', 30 * 60000)
       if (!pos && iniyor) {
@@ -2449,6 +2462,16 @@ function istatistikKaydet() {
 }
 setInterval(istatistikKaydet, 30000).unref()
 process.on('exit', istatistikKaydet)
+// Discord botu durdurunca (SIGTERM): sunucudan düzgün çık, kayıtlar yazılsın
+for (const sinyal of ['SIGTERM', 'SIGINT']) {
+  process.on(sinyal, () => {
+    durduruluyor = true
+    try {
+      bot.quit()
+    } catch (_) {}
+    setTimeout(() => process.exit(0), 500)
+  })
+}
 
 // ---------- ÖLÜM ----------
 // Ölünce odaya haber verir ([olum] satırı: Discord sahibini etiketler). Doğunca ölüm
@@ -2798,6 +2821,12 @@ function sohbetMetni(r) {
       return v
     }
   }
+  // 1.20.3+ atılma sebebi NBT gelir: {"type":"compound","value":{"text":{"type":"string","value":"..."}}}
+  if (v && typeof v === 'object' && typeof v.type === 'string' && 'value' in v) {
+    try {
+      v = require('prismarine-nbt').simplify(v)
+    } catch (_) {}
+  }
   const parca = (x) =>
     typeof x === 'string'
       ? x
@@ -2826,14 +2855,24 @@ bot.on('error', (e) => {
   // Daha bağlanmadan (ör. Microsoft girişi başarısız) hata olursa 'end' gelmez
   if (!hazir && !bot._client?.socket) process.exit(1)
 })
-// Bazı sunucular (ör. Cuberite) yeniden doğunca can paketini doğma paketinden önce
-// yollar: mineflayer botu ölü sanıp konum göndermeyi bırakır ve sonraki ölümü
-// kaçırır. Doğduktan sonra canı varsa canlı say; ölümü candan da yakala.
+// Bazı sunucular (ör. Cuberite) yeniden doğunca can paketini hiç yollamaz ya da
+// doğma paketinden önce yollar: mineflayer botu ölü sanıp konum göndermeyi bırakır
+// (bot donar) ve sonraki ölümü kaçırır. Doğduktan sonra can gelmezse canlı say.
 let oluKayitli = false
 bot.on('respawn', () => {
   setTimeout(() => {
-    if (bot.isAlive === false && bot.health > 0) bot.isAlive = true
-  }, 1500)
+    if (bot.isAlive !== false || !bot.entity) return
+    if (bot.health > 0) {
+      bot.isAlive = true // can paketi doğmadan önce gelmişti
+      return
+    }
+    // can hiç gelmedi: sunucu tam canla doğurdu (vanilla bunu hemen yollar)
+    bot.health = 20
+    bot.isAlive = true
+    oluKayitli = false
+    bot.emit('health')
+    bot.emit('spawn')
+  }, 2000)
 })
 bot.on('health', () => {
   if (bot.health > 0) oluKayitli = false
@@ -2866,7 +2905,9 @@ bot.on('death', () => {
   brain.recordEvent(olay)
   brain.reflect(olay).then((t) => t && say(t)).catch(() => {})
 })
+let durduruluyor = false // Discord'dan /durdur: "bağlantı koptu" yazılmasın
 bot.on('end', (reason) => {
+  if (durduruluyor) process.exit(0)
   console.log('[olay] Bağlantı koptu:', reason)
   process.exit(sifreReddedildi ? 4 : 0) // 4 = şifre yanlış: discordbot.js tekrar bağlanmasın
 })

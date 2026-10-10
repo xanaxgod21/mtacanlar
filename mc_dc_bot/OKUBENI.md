@@ -9,6 +9,43 @@ ayrı çalışır.
 
 ## Yenilikler (son sürüm)
 
+- **Kendini korur:** zombi, iskelet, örümcek gibi yaratıklar gelince en iyi kılıcı
+  (yoksa baltası) ile savaşır, creeper ve warden'dan kaçar, canı azalınca kaçar ve
+  yemek yer. Savaş bitince işine kaldığı yerden devam eder. Oyunculara ve adı konmuş
+  yaratıklara dokunmaz. **"beni koru"** (`!koru`) deyince sahibinin yanında durur,
+  ona saldıranlarla savaşır. `!koruma kapat` ile kapatılır.
+- **Ölünce haber verir, eşyalarını toplar:** öldüğü yeri ve sebebini odaya yazar,
+  müşteriyi **etiketler**; doğunca öldüğü yere gidip eşyalarını toplar ve yaptığı
+  işe geri döner (10 dakikada 3 kez ölürse durur). **Sunucudan atılırsa** sebebiyle
+  birlikte odada etiketler ve **DM** atar; 3 kez bağlanamazsa yine DM gelir.
+- **Derin maden:** "elmas kaz" (`!maden elmas`, ayrıca demir, altın, kızıltaş, lapis,
+  bakır) deyince o cevherin bulunduğu seviyeye **merdiven kazarak** iner (1.18+
+  dünyada elmas için y=-54), yolda değerli cevherleri alır, orada tünel açarak arar.
+  Lavı, suyu ve boşluğu görünce o yöne kazmaz.
+- **Kendi aletini yapar:** kazması/baltası kırılınca üstündeki **en değerli**
+  malzemeden yenisini yapar: elmas varsa elmas, demir külçesi ya da **ham demir**
+  varsa (ham demiri **fırında eritip**) demir, yoksa taş, o da yoksa tahta. Masa ve
+  fırını kendisi yapıp koyar, işi bitince geri alır. Elle de: `!yap kazma`,
+  "kendine kılıç yap". Maden kazarken ham demir biriktirince kazmasını demire yükseltir.
+- **AFK farm:** `!balik` (olta yoksa ipten yapar, yakındaki suda balık tutar),
+  `!xp` (yaratık çiftliğinde yerinden kıpırdamadan gelenleri keser), `!farm` artık
+  **şeker kamışı ve bambu** (kökü kalır), **saplı balkabağı / karpuz** (sap kalır,
+  süs balkabağına dokunmaz) ve nether siğili de toplar.
+- **`/envanter` ve günlük rapor:** müşteri `/envanter` ile botunun üstündekileri
+  (aletlerin dayanıklılığı dahil) görür. Her gece (`rapor_saati`, varsayılan 23:55)
+  o gün iş yapan botun **raporu** odaya düşer: kaç kütük, hangi cevherden kaç tane,
+  kaç taş, ürün, balık, kesilen yaratık, sandığa koyduğu eşyalar, yaptığı aletler,
+  ölüm. İstediği an `/rapor` (bugün / dün).
+- **Paketler:** key üretirken/verirken **paket** seçersin: **Tam paket** ya da
+  **Sadece odun / Sadece maden / Sadece farm** (ucuz paketler), ve **1-3 bot**.
+  Paket dışı işi istenince bot "bu iş paketinde yok" der. Her paketin ve ek bot
+  hakkının kendi süresi vardır: ucuz bir "sadece odun" keyi tam paketin süresini
+  uzatmaz (tam paket bitince odun paketi kalan süresince devam eder). Paket ya da
+  bot hakkı biterse fazla botlar durur, kalanlar yeni paketle yeniden bağlanır.
+- **Bir keyle birden çok bot:** 2-3 bot hakkı olan müşteri `/baslat bot:2` yazar;
+  2. bot ilk seferde 1. botun sunucusunu ve sahibini alır, adının sonuna 2 eklenir.
+  Komutlarda `bot:` seçer, odaya "2: odun kes" ya da "bot2 maden kaz" yazar. Loglar
+  `[Bot 1]` / `[Bot 2]` etiketli düşer. `/durum` hepsini gösterir, `/durdur` hepsini durdurur.
 - **Odaya yazman yeter:** müşteri odasına düz yazı yazar, bot yapar: "odun kes",
   "maden kaz", "taş kır", "gel", "dur", "durum". Cevabı mesaja yanıt olarak gelir.
   Yapay zeka kapalıyken de anlar. Odaya `/warp xanaxgod` yazarsa bot oyunda o komutu
@@ -113,14 +150,16 @@ kapanınca botlar da kapanır; açınca çalışan müşteri botları kendiliği
 - `oda_silme_saat`: süre bitince müşterinin odası kaç saat sonra silinsin
   (0 = hemen silinir; örneğin 24 yazarsan oda 1 gün kilitli bekler, sonra silinir)
 - `anthropic_api_key`: yapay zeka için; `/yapay-zeka` ile girilir (boşsa botlar basit modda)
-- `max_bot`: aynı anda en fazla kaç müşteri botu çalışsın (her müşteri 1 bot,
-  her bot kendi sunucusuna girer). Ölçülen: bot başı ~140 MB RAM; boştayken
+- `max_bot`: aynı anda en fazla kaç oyun botu çalışsın (2-3 bot paketli müşterinin
+  her botu ayrı sayılır, her bot kendi sunucusuna girer). Ölçülen: bot başı ~140 MB RAM; boştayken
   neredeyse CPU yemez, görev yaparken (odun/taş) bot başı ~0,2 çekirdek.
   20 bot için en az **4 GB RAM, 4 çekirdekli** bir VPS al. Daha fazla müşteri
   için sayıyı artır, RAM'i ona göre büyüt (40 bot ≈ 6-8 GB).
 - `ai_gunluk_limit`: müşteri başı günlük yapay zeka isteği (0 = sınırsız).
   Yapay zeka parasını sen ödersin, bu sınır faturanı korur.
 - `musteri_kategori_id`: boş bırakırsan bot "Yaren Odaları" kategorisini açar.
+- `rapor_saati`: günlük raporun odalara düşeceği saat (Türkiye saati, örn. `"23:55"`).
+  `"kapali"` yazarsan gece raporu gitmez (`/rapor` yine çalışır).
 
 Elle kurmak istersen (eski yol) `/panel-kur` bulunduğun kanalı key kanalı,
 `/yonetim-kur` yönetim panelini kurar. Botu Yönetici olmadan eklediysen en az:
@@ -150,8 +189,8 @@ güncellenir. Butonlar (sadece sen ve yetkili rolü basabilir):
 
 | Buton | Ne yapar |
 |---|---|
-| 🎁 **Key Ver** | Kişiyi, süreyi (saat/gün/hafta/ay/süresiz) ve yapay zekayı seçersin; key ona **DM ile gider**. DM'i kapalıysa key sana gösterilir |
-| 🔑 **Key Oluştur** | Süreyi ve kaç tane olduğunu seçersin, keyler sana gösterilir (bir kez), kendin dağıtırsın |
+| 🎁 **Key Ver** | Kişiyi, süreyi (saat/gün/hafta/ay/süresiz), yapay zekayı ve **paketi** (tam / sadece odun / maden / farm, 1-3 bot) seçersin; key ona **DM ile gider**. DM'i kapalıysa key sana gösterilir |
+| 🔑 **Key Oluştur** | Süreyi, kaç tane olduğunu ve paketi seçersin, keyler sana gösterilir (bir kez), kendin dağıtırsın |
 | ⏩ **Süre Uzat** | Kişiye süre ekler; süresi bitip odası silindiyse odası geri açılır |
 | ⛔ **Lisans Bitir** | "Süresini şimdi bitir" (yeni key alırsa devam eder) ya da "İptal et" (bir daha key giremez). Onay sorar; botu durur, odası silinir, kişiye DM gider |
 | 🔎 **Key Sorgula** | Bir keyin geçmişi: kim üretti, kime verildi, kim ne zaman kullandı / iptal etti |
@@ -186,8 +225,8 @@ başlar**; key beklerken süre yanmaz.
 
 | Komut | Ne yapar |
 |---|---|
-| `/key-olustur birim:gün miktar:30 adet:5 ai:true` | Key üretir, sana gösterir (bir kez). `ai:false` = yapay zekasız |
-| `/key-ver kullanici:@ali birim:hafta miktar:2` | Key üretip Ali'ye **DM ile gönderir**. Ali keyi girince odası açılır. DM'i kapalıysa key sana gösterilir |
+| `/key-olustur birim:gün miktar:30 adet:5 ai:true paket:odun:1` | Key üretir, sana gösterir (bir kez). `ai:false` = yapay zekasız. `paket` boşsa tam paket, 1 bot |
+| `/key-ver kullanici:@ali birim:hafta miktar:2 paket:tam:2` | Key üretip Ali'ye **DM ile gönderir** (tam paket, 2 bot). Ali keyi girince odası açılır. DM'i kapalıysa key sana gösterilir |
 | `/key-liste` | Boşta / kullanılmış / iptal keyler ve süreleri |
 | `/key-sorgu key:YAREN-XXXX` | Keyin geçmişi: üreten, verildiği kişi, kullanan, iptal eden ve saatleri |
 | `/key-iptal key:YAREN-XXXX` | Satılmamış bir keyi iptal eder |
@@ -229,10 +268,14 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
    de aynısı. `!maden`, `!sandik ekle` gibi oyun komutları da olur.
 6. Oyun sohbeti odasına düşer: `/sohbet durum:kapalı` ile kapatır. `/yaz mesaj:selam`
    ile bot oyunda yazar.
-7. `/gorev` `/durum` `/soyle` `/komut` `/sandik` `/durdur` odada; `/bilgi` ve `/odam` her yerde.
-8. Kalan süreyi odada, `/bilgi`'de ve oda başlığında görür (geri sayım). Bitişe
+7. `/gorev` `/durum` `/envanter` `/rapor` `/soyle` `/komut` `/sandik` `/durdur` odada;
+   `/bilgi` (paketi ve botları dahil) ve `/odam` her yerde. Birden çok bot hakkı
+   varsa komutlarda `bot:2` seçer, odaya "2: odun kes" yazar.
+8. Botu ölünce ya da sunucudan atılınca odada etiketlenir (atılınca DM de gelir).
+   Her gece o günün raporu odaya düşer.
+9. Kalan süreyi odada, `/bilgi`'de ve oda başlığında görür (geri sayım). Bitişe
    1 gün ve 1 saat kala uyarılır.
-9. Süre bitince botu durur, **odası silinir** ve DM ile haber verilir. Yeni key
+10. Süre bitince botu durur, **odası silinir** ve DM ile haber verilir. Yeni key
    girerse odası yeniden açılır; botunun ayarları, sandıkları, deneyimleri kaybolmaz.
    Süresi bitmeden yeni key girerse süre kalan sürenin üstüne eklenir.
 
@@ -242,15 +285,22 @@ Müşterinin odasında sen de onun komutlarını kullanabilirsin (destek için).
   yaprakta boşuna aşınmaz), düşen fidanları toplar ve diker. Sadece kestiği
   ağacın doğal yapraklarına dokunur; uzanamadığı yapraklar kendiliğinden dökülür.
 - **Maden:** cevher kazar (kömür, demir, bakır, altın, kızıltaş, lapis, elmas,
-  zümrüt; derin kaya ve Nether cevherleri dahil). Önce mağara duvarında açıkta
+  zümrüt; derin kaya ve Nether cevherleri dahil). `!maden elmas` (demir, altın,
+  kızıltaş, lapis, bakır) önce o cevherin seviyesine merdivenle iner. Önce mağara duvarında açıkta
   olanları, sonra yakındakileri kazar. Kazmasının yetmediğini (elmas, altın için
   en az demir kazma) ve lavın dibindekini kazmaz. Görünen cevher kalmayınca ayak
   ve baş hizasında düz tünel açarak arar (aşağı kuyu kazmaz); 64 adımda bulamazsa
   durur. En iyi sonucu madende / mağarada verir (`/warp maden` gibi).
 - **Alet bakımı:** baltanın (kazmanın) 10'dan az dayanıklılığı kalınca
   envanterdeki sağlam olanına geçer; yoksa gösterilen sandıklardan alır. Hiç
-  yoksa sohbetten haber verir ve eskisiyle devam eder. Büyülü aleti kırılmasın
-  diye kullanmaz.
+  yoksa üstündeki malzemeden **kendine yenisini yapar** (elmas > demir (ham demiri
+  eritir) > taş > tahta); malzemesi de yoksa sohbetten haber verir. Büyülü aleti
+  kırılmasın diye kullanmaz.
+- **Savaş:** yaklaşan düşman yaratıklarla savaşır (kılıç > balta), creeper'dan
+  kaçar; görev savaş bitince devam eder. `!koru` sahibini korur, `!koruma kapat`.
+- **Farm:** olgun ekinleri toplar ve yeniden eker; şeker kamışı/bambunun kökünü,
+  balkabağı/karpuzun sapını bırakır. `!balik` balık tutar, `!xp` yerinde durup
+  gelen yaratıkları keser (yaratık çiftliği).
 - **Sandıklar:** oyunda sandığın dibinde dur ve `!sandik ekle` yaz (ya da
   `!sandik ekle x y z`, Discord'da `/sandik`). En fazla 10 sandık; sunucu başına
   ayrı kaydedilir. `!sandik liste`, `!sandik sil`, `!sandik temizle`.

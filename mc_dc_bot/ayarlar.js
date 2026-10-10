@@ -95,6 +95,7 @@ module.exports = {
   odaSilmeSaat: sayi('ODA_SILME_SAAT', 'oda_silme_saat', 0), // süre bitince oda kaç saat sonra silinsin (0 = hemen)
   musteriKategoriId: al('MUSTERI_KATEGORI_ID', 'musteri_kategori_id'), // boşsa bot açar
   maxBot: sayi('MAX_BOT', 'max_bot', 20), // aynı anda en fazla kaç müşteri botu
+  raporSaati: al('RAPOR_SAATI', 'rapor_saati', '23:55'), // günlük rapor saati (TR), "kapali" = gönderme
   aiGunlukLimit: sayi('AI_GUNLUK_LIMIT', 'ai_gunluk_limit', 200), // müşteri başı, 0 = sınırsız
   mcSahip: al('MC_OWNER', 'mc_sahip', 'Lyraiv'),
   apiKey: al('ANTHROPIC_API_KEY', 'anthropic_api_key') || oku('anahtar.txt').trim(),
