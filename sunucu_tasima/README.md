@@ -12,20 +12,23 @@ kanallar, kanal izinleri, banlar, istersen mesajlar) yeni sunucuya kopyalar.
 6. Yeni sunucuda **Sunucu Ayarları → Roller**'den botun rolünü en üste sürükle
    (bot kendi rolünün üstündeki rolleri düzenleyemez).
 
-## 2) Sunucu ID'lerini al
-Discord → Ayarlar → Gelişmiş → **Geliştirici Modu** aç.
-Sunucu ikonuna sağ tık → **Sunucu ID'sini Kopyala** (eski ve yeni için ayrı ayrı).
-
-## 3) Çalıştır
+## 2) Çalıştır
 ```
 pip install -r requirements.txt
 python sunucu_tasima.py
 ```
-Program token'ı, sunucu ID'lerini ve neyin kopyalanacağını sorar,
-cevapları `tasima_config.json` dosyasına kaydeder (token da burada durur, paylaşma).
+Program token'ı ve neyin kopyalanacağını sorar. Bot giriş yapınca bulunduğu
+sunucuları numaralı liste olarak gösterir; önce **kopyalanacak** sunucuyu, sonra
+**hedef** sunucuyu numarasıyla seçersin (ID bulmana gerek yok).
+Cevaplar `tasima_config.json` dosyasına kaydedilir (token da burada durur, paylaşma).
 
 Yeni sunucuyu temizleme seçeneği açıksa, güvenlik için yeni sunucunun adını
 aynen yazmanı ister.
+
+## Bot kullanmadan: Discord Sunucu Şablonu
+Sadece kanal/rol/izin yapısı lazımsa Discord'un kendi özelliği yeterli:
+eski sunucuda **Sunucu Ayarları → Sunucu Şablonu → Şablon Oluştur** → linki aç →
+yeni sunucu kurulur. (Emoji, mesaj, ban, ikon gelmez; onlar için botu kullan.)
 
 ## Neler kopyalanır
 | Ne | Not |

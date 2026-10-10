@@ -89,8 +89,6 @@ def load_config():
     token = ask("Bot token", "(kayitli)" if cfg.get("token") else None)
     if token != "(kayitli)":
         cfg["token"] = token
-    cfg["source_id"] = ask("ESKI sunucu ID", cfg.get("source_id"))
-    cfg["target_id"] = ask("YENI sunucu ID", cfg.get("target_id"))
 
     print()
     cfg["wipe_target"] = ask_yes("Yeni sunucudaki mevcut kanal/rol/emojiler SILINSIN mi?", cfg.get("wipe_target", True))
@@ -103,24 +101,36 @@ def load_config():
         "Her yazi kanalindan kac mesaj kopyalansin? (0 = kopyalama)", cfg.get("messages_per_channel", 0)
     )
 
-    for key in ("token", "source_id", "target_id"):
-        if not str(cfg.get(key, "")).strip():
-            print(f"HATA: {key} bos olamaz.")
-            input("Cikmak icin Enter'a bas...")
-            sys.exit(1)
-    if not (str(cfg["source_id"]).isdigit() and str(cfg["target_id"]).isdigit()):
-        print("HATA: Sunucu ID'leri sadece rakamdan olusmali.")
-        input("Cikmak icin Enter'a bas...")
-        sys.exit(1)
-    if cfg["source_id"] == cfg["target_id"]:
-        print("HATA: Eski ve yeni sunucu ayni olamaz.")
+    if not str(cfg.get("token", "")).strip():
+        print("HATA: token bos olamaz.")
         input("Cikmak icin Enter'a bas...")
         sys.exit(1)
 
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    save_config(cfg)
     print(f"\nAyarlar kaydedildi: {CONFIG_PATH}\n")
     return cfg
+
+
+def save_config(cfg):
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+
+def pick_guild(guilds, prompt, default_id=None, exclude=None):
+    """Botun bulundugu sunuculardan birini numarayla sectirir."""
+    choices = [g for g in guilds if g != exclude]
+    default = None
+    for i, g in enumerate(choices, start=1):
+        mark = ""
+        if default_id and str(g.id) == str(default_id):
+            default = str(i)
+            mark = "  (son secim)"
+        print(f"  {i}) {g.name}  [{g.member_count} uye]{mark}")
+    while True:
+        val = ask(prompt, default)
+        if val.isdigit() and 1 <= int(val) <= len(choices):
+            return choices[int(val) - 1]
+        print("  Listeden gecerli bir numara gir.")
 
 
 # ----------------- YARDIMCILAR -----------------
@@ -552,11 +562,21 @@ def main():
     async def on_ready():
         log(f"Bot giris yapti: {client.user}")
         try:
-            src = client.get_guild(int(cfg["source_id"]))
-            dst = client.get_guild(int(cfg["target_id"]))
-            if src is None or dst is None:
-                log("HATA: Bot iki sunucuda da olmali. Botu eski ve yeni sunucuya ekle.")
+            guilds = sorted(client.guilds, key=lambda g: g.name.lower())
+            if len(guilds) < 2:
+                invite = discord.utils.oauth_url(client.user.id, permissions=discord.Permissions(administrator=True))
+                log("\nHATA: Bot en az 2 sunucuda olmali (eski ve yeni).")
+                log(f"Botu su linkle iki sunucuya da ekle, sonra tekrar calistir:\n{invite}")
                 return
+
+            print("\nBotun bulundugu sunucular:")
+            src = await asyncio.to_thread(pick_guild, guilds, "KOPYALANACAK (eski) sunucunun numarasi",
+                                          cfg.get("source_id"))
+            print(f"\n'{src.name}' sunucusu su sunucuya kopyalanacak:")
+            dst = await asyncio.to_thread(pick_guild, guilds, "HEDEF (yeni) sunucunun numarasi",
+                                          cfg.get("target_id"), src)
+            cfg["source_id"], cfg["target_id"] = str(src.id), str(dst.id)
+            save_config(cfg)
             log(f"Eski sunucu: {src.name}  ->  Yeni sunucu: {dst.name}")
             if not dst.me.guild_permissions.administrator:
                 log("HATA: Bot yeni sunucuda Yonetici (Administrator) yetkisine sahip olmali.")
