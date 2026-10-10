@@ -2136,6 +2136,7 @@ async function tunelAdimi(id) {
 
 // Derin maden: bakılan yöne bir basamak aşağı (merdiven). Önündeki 3 blok kazılır,
 // basamağın altı sağlam olmalı (boşluğa, lava, suya inmez). Döner: 'ok' | 'kazma' | 'kapali'
+let sonInisEngeli = '' // inemeyince neyin engel olduğu (log için)
 async function inisAdimi(id) {
   for (let deneme = 0; deneme < 4; deneme++) {
     if (id !== taskId) return 'ok'
@@ -2143,9 +2144,12 @@ async function inisAdimi(id) {
     const ileri = ayak.plus(YATAY[tunelYonu])
     const bloklar = [ileri.offset(0, 1, 0), ileri, ileri.offset(0, -1, 0)].map((p) => bot.blockAt(p))
     const zemin = bot.blockAt(ileri.offset(0, -2, 0))
-    const kapali =
-      !zemin || zemin.boundingBox !== 'block' || tehlikeli(zemin) || bloklar.some(tehlikeli) || !bloklar.every(kazilabilirMi)
-    if (kapali) {
+    const engel =
+      !zemin || zemin.boundingBox !== 'block'
+        ? `basamağın altında ${zemin ? zemin.name : 'yüklenmemiş yer'}`
+        : [zemin, ...bloklar].find(tehlikeli)?.name || bloklar.find((b) => !kazilabilirMi(b))?.name || null
+    if (engel) {
+      sonInisEngeli = engel
       tunelYonu = (tunelYonu + 1) % 4
       continue
     }
@@ -2246,7 +2250,7 @@ async function madenTask(id, secenek = {}) {
         }
         if (r === 'kapali') {
           iniyor = false
-          console.log(`[maden] Daha aşağı inemiyorum (önüm lav, su ya da boşluk), y=${Math.floor(bot.entity.position.y)} seviyesinde arıyorum.`)
+          console.log(`[maden] Daha aşağı inemiyorum (önümde: ${sonInisEngeli || 'lav, su ya da boşluk'}), y=${Math.floor(bot.entity.position.y)} seviyesinde arıyorum.`)
         } else inisEngel = 0
         hatalar = 0
         continue
@@ -2379,6 +2383,15 @@ function balikBekle(ms) {
     }
     bot.on('soundEffectHeard', ses)
     const t = setTimeout(() => son(new Error('balık tutulamadı')), ms)
+    // şamandıra suya düşmediyse (kıyıya, bloğa) boşuna beklemesin
+    setTimeout(() => {
+      if (bitti) return
+      const s = Object.values(bot.entities).find((e) => e.name === 'fishing_bobber' && e.position.distanceTo(bot.entity.position) < 30)
+      if (!s) return
+      const altinda = [s.position.floored(), s.position.offset(0, -0.5, 0).floored()].map((p) => bot.blockAt(p)?.name)
+      if (altinda.includes('water')) return
+      son(new Error('şamandıra suya düşmedi')) // balikTask oltayı geri çeker
+    }, 5000)
     bot.fish().then(
       () => son(),
       (e) => son(e)
@@ -2393,11 +2406,13 @@ async function balikTask(id) {
     if (!oltaBul()) return gorevNotu(id, `Oltam yok${r.neden ? ` (${r.neden})` : ''}. Bana bir olta ver.`)
   }
   const suId = bot.registry.blocksByName.water?.id
+  // açık su: dört yanı da su olan yüzey (şamandıra kıyıya, buza düşmesin)
+  const acikSu = (b) => YATAY.every((d) => bot.blockAt(b.position.plus(d))?.name === 'water')
   const su = bot
-    .findBlocks({ matching: suId, maxDistance: 20, count: 80 })
+    .findBlocks({ matching: suId, maxDistance: 20, count: 120 })
     .map((p) => bot.blockAt(p))
     .filter((b) => b && bot.blockAt(b.position.offset(0, 1, 0))?.boundingBox === 'empty')
-    .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
+    .sort((a, b) => a.position.distanceTo(bot.entity.position) + (acikSu(a) ? 0 : 8) - b.position.distanceTo(bot.entity.position) - (acikSu(b) ? 0 : 8))[0]
   if (!su) return gorevNotu(id, 'Yakında su göremiyorum. Beni suyun kenarına götür.')
   if (su.position.distanceTo(bot.entity.position) > 6) {
     await gotoTimeout(new goals.GoalNear(su.position.x, su.position.y + 1, su.position.z, 4), 30000).catch(() => {})
