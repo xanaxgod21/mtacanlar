@@ -36,17 +36,22 @@ const { Client } = require('discord.js-selfbot-v13');
 
 // ----------------- AYARLAR -----------------
 // baslat.ps1 bunlari ortam degiskenleriyle (KAYNAK_SUNUCU, HEDEF_SUNUCU,
-// ROLLERI_KOPYALA, MESAJLARI_KOPYALA, TARIH_EKLE, SUNUCU_LISTE) ezer.
+// ROLLERI_KOPYALA, MESAJLARI_KOPYALA, TARIH_EKLE, MESAJ_LIMITI, MESAJ_BIRLESTIR,
+// PARALEL_KANAL, SUNUCU_LISTE) ezer.
 const listMode = process.env.SUNUCU_LISTE === '1';
 const flag = (name, def) => (process.env[name] == null ? def : process.env[name] !== '0');
+const num = (name, def) => (/^\d+$/.test(process.env[name] ?? '') ? Number(process.env[name]) : def);
 const AYARLAR = {
   kaynakSunucu: listMode ? '' : process.env.KAYNAK_SUNUCU ?? '1291429958895407248', // bos ('') birakirsan sorar
   hedefSunucu: listMode ? '' : process.env.HEDEF_SUNUCU ?? '1555467184984293416',
   rolleriKopyala: flag('ROLLERI_KOPYALA', true),
   mesajlariKopyala: flag('MESAJLARI_KOPYALA', true),
   tarihEkle: flag('TARIH_EKLE', true), // mesajin altina orijinal tarihini kucuk yazi olarak ekler
+  mesajLimiti: num('MESAJ_LIMITI', 200), // kanal basina en fazla bu kadar (en yeni) mesaj; 0 = hepsi
+  mesajBirlestir: flag('MESAJ_BIRLESTIR', true), // ayni kisinin ardisik mesajlarini tek mesajda toplar
+  paralelKanal: num('PARALEL_KANAL', 3), // ayni anda kac kanalin mesajlari aktarilsin
   bekleme: 1500, // kanal/rol olusturma arasi bekleme (ms)
-  mesajBekleme: 1200, // mesajlar arasi bekleme (ms); hesabi korumak icin dusurme
+  mesajBekleme: 2000, // ayni kanala mesajlar arasi bekleme (ms); Discord webhook siniri kanal basina ~30/dk
 };
 // -------------------------------------------
 
@@ -87,7 +92,7 @@ const uploadLimit = guild => (UPLOAD_LIMIT[guild.premiumTier] ?? 10) * 1024 * 10
 
 function loadState(source, target) {
   const file = path.join(__dirname, `ilerleme_${source.id}_${target.id}.json`);
-  let data = { roles: {}, channels: {}, messages: {} };
+  let data = { roles: {}, channels: {}, messages: {}, sent: {} };
   if (fs.existsSync(file)) {
     data = { ...data, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
     console.log(`Onceki ilerleme bulundu, kaldigi yerden devam ediliyor (${path.basename(file)}).`);
@@ -303,11 +308,9 @@ function splitContent(text, size = 2000) {
   return parts;
 }
 
-// Tek bir mesaji webhook ile yeniden gonderir. Gonderilecek bir sey yoksa
-// (sistem mesaji, bos mesaj) false doner.
-async function copyMessage(msg, hook, limit) {
-  if (msg.system) return false;
-
+// Tek bir mesaji webhook ile yeniden gonderir. text verilirse mesajin
+// yazisi yerine o kullanilir (birlestirilmis mesajlar icin).
+async function copyMessage(msg, hook, limit, text = msg.content ?? '') {
   const files = [];
   const links = [];
   for (const a of msg.attachments.values()) {
@@ -316,9 +319,9 @@ async function copyMessage(msg, hook, limit) {
   }
   for (const s of msg.stickers.values()) links.push(`[cikartma: ${s.name}]`);
 
-  let content = msg.content ?? '';
+  let content = text;
   if (links.length) content += (content ? '\n' : '') + links.join('\n');
-  const embeds = msg.embeds.filter(e => e.type === 'rich').slice(0, 10);
+  const embeds = msg.embeds.filter(isRich).slice(0, 10);
   if (!content && !files.length && !embeds.length) return false;
   if (AYARLAR.tarihEkle) content += `${content ? '\n' : ''}-# <t:${Math.floor(msg.createdTimestamp / 1000)}:f>`;
 
@@ -347,66 +350,148 @@ async function copyMessage(msg, hook, limit) {
   return true;
 }
 
+const isRich = e => e.type === 'rich';
+// Sadece yazidan olusan, birlestirilebilir mesaj.
+const isPlain = m => !m.system && m.content && !m.attachments.size && !m.stickers.size && !m.embeds.some(isRich);
+const byId = (a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1);
+const day = ts => new Date(ts).toLocaleDateString('tr-TR');
+
+// Discord'un ekranda yaptigi gibi ayni kisinin 7 dakika icindeki ardisik
+// yazi mesajlarini tek mesajda toplar; gonderilecek mesaj sayisi azalir.
+function groupMessages(msgs) {
+  const groups = [];
+  for (const m of msgs) {
+    if (m.system) continue;
+    const g = groups[groups.length - 1];
+    if (
+      AYARLAR.mesajBirlestir &&
+      g &&
+      isPlain(m) &&
+      isPlain(g.last) &&
+      g.last.author.id === m.author.id &&
+      m.createdTimestamp - g.last.createdTimestamp < 7 * 60_000 &&
+      g.text.length + m.content.length + 1 <= 1900
+    ) {
+      g.text += `\n${m.content}`;
+      g.last = m;
+      g.size++;
+    } else {
+      groups.push({ first: m, last: m, text: m.content ?? '', size: 1 });
+    }
+  }
+  return groups;
+}
+
+// Kanalin en yeni `count` mesajini (sistem mesajlari haric) eskiden yeniye dondurur.
+async function fetchLatest(ch, count) {
+  const result = [];
+  let before;
+  while (result.length < count) {
+    const page = await ch.messages.fetch({ limit: 100, ...(before && { before }) }, { cache: false });
+    const sorted = [...page.values()].sort(byId).reverse(); // yeniden eskiye
+    result.push(...sorted.filter(m => !m.system));
+    if (page.size < 100) break;
+    before = sorted[sorted.length - 1].id;
+  }
+  return result.slice(0, count).reverse();
+}
+
 async function getWebhook(target, channelId, hooks) {
   const existing = hooks.find(h => h.channelId === channelId && h.name === WEBHOOK_NAME && h.token);
   if (existing) return existing;
   return target.channels.createWebhook(channelId, WEBHOOK_NAME, { reason: 'Sunucu tasima' });
 }
 
+// Bir kanalin mesajlarini aktarir. mesajLimiti > 0 ise kanalin en son o
+// kadar mesaji aktarilir, sonra siradaki kanala gecilir.
+async function copyChannelMessages(ch, target, hook, state) {
+  const limit = uploadLimit(target);
+  const max = AYARLAR.mesajLimiti;
+  const sent = state.data.sent;
+  const tag = `#${ch.name}`;
+
+  if (sent[ch.id] == null) {
+    if (state.data.messages[ch.id] && max > 0) {
+      // Limit eklenmeden onceki bir calismada aktarilmaya baslanmis kanal.
+      console.log(`  ${tag}: onceki calismada aktarilmisti, geciliyor.`);
+      state.data.messages[ch.id] = 'bitti';
+      state.save();
+      return 0;
+    }
+    sent[ch.id] = 0;
+  }
+
+  let count = 0;
+  const sendAll = async msgs => {
+    for (const g of groupMessages(msgs)) {
+      if (max > 0 && sent[ch.id] >= max) return false;
+      try {
+        if (await copyMessage(g.first, hook, limit, g.text)) await wait(AYARLAR.mesajBekleme);
+      } catch (err) {
+        console.log(`    ! ${tag}: mesaj gonderilemedi (${g.first.id}): ${err.message}`);
+      }
+      sent[ch.id] += g.size;
+      count += g.size;
+      state.data.messages[ch.id] = g.last.id;
+      state.save();
+      if (count % 25 < g.size) {
+        const of = max > 0 ? `/${max}` : '';
+        console.log(`    ${tag}: ${sent[ch.id]}${of} mesaj (${day(g.last.createdTimestamp)})`);
+      }
+    }
+    return true;
+  };
+
+  if (max > 0) {
+    const last = state.data.messages[ch.id];
+    const msgs = (await fetchLatest(ch, max)).filter(m => !last || BigInt(m.id) > BigInt(last));
+    await sendAll(msgs.slice(0, Math.max(0, max - sent[ch.id])));
+  } else {
+    let after = state.data.messages[ch.id] ?? '0';
+    while (true) {
+      const page = await ch.messages.fetch({ limit: 100, after }, { cache: false });
+      if (!page.size) break;
+      const sorted = [...page.values()].sort(byId); // eskiden yeniye
+      if (!(await sendAll(sorted))) break;
+      after = sorted[sorted.length - 1].id;
+      state.data.messages[ch.id] = after;
+      state.save();
+    }
+  }
+
+  state.data.messages[ch.id] = 'bitti';
+  state.save();
+  console.log(`  ${tag}: bitti (${sent[ch.id]} mesaj).`);
+  return count;
+}
+
 async function copyMessages(source, target, channels, state) {
   const hooks = [...(await target.fetchWebhooks().catch(() => new Map())).values()];
-  const limit = uploadLimit(target);
-  let total = 0;
+  state.data.sent ??= {};
 
-  for (const ch of channels) {
-    if (!MESSAGE_TYPES.has(ch.type) || !ch.messages) continue;
+  const todo = channels.filter(ch => {
+    if (!MESSAGE_TYPES.has(ch.type) || !ch.messages) return false;
     const targetId = state.data.channels[ch.id];
-    if (!targetId || !target.channels.cache.has(targetId)) continue;
-    if (state.data.messages[ch.id] === 'bitti') continue;
+    return targetId && target.channels.cache.has(targetId) && state.data.messages[ch.id] !== 'bitti';
+  });
 
-    let hook;
-    try {
-      hook = await getWebhook(target, targetId, hooks);
-    } catch (err) {
-      console.log(`  ! #${ch.name}: webhook olusturulamadi, mesajlar atlandi (${err.message})`);
-      continue;
-    }
-
-    console.log(`  # ${ch.name} mesajlari aktariliyor...`);
-    let after = state.data.messages[ch.id] ?? '0';
-    let count = 0;
-    while (true) {
-      let page;
+  let total = 0;
+  let next = 0;
+  // Webhook siniri kanal basina oldugu icin birden fazla kanal ayni anda aktarilir.
+  const worker = async () => {
+    while (next < todo.length) {
+      const ch = todo[next++];
       try {
-        page = await ch.messages.fetch({ limit: 100, after }, { cache: false });
+        const hook = await getWebhook(target, state.data.channels[ch.id], hooks);
+        console.log(`  # ${ch.name} mesajlari aktariliyor...`);
+        const count = await copyChannelMessages(ch, target, hook, state);
+        total += count;
       } catch (err) {
-        console.log(`  ! #${ch.name}: mesajlar okunamadi (${err.message})`);
-        break;
+        console.log(`  ! #${ch.name}: mesajlar aktarilamadi (${err.message})`);
       }
-      if (!page.size) {
-        state.data.messages[ch.id] = 'bitti';
-        state.save();
-        break;
-      }
-      // API en yeniden eskiye dondurur; eskiden yeniye gonderiyoruz.
-      const sorted = [...page.values()].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
-      for (const msg of sorted) {
-        try {
-          if (await copyMessage(msg, hook, limit)) {
-            count++;
-            await wait(AYARLAR.mesajBekleme);
-          }
-        } catch (err) {
-          console.log(`    ! mesaj gonderilemedi (${msg.id}): ${err.message}`);
-        }
-        after = msg.id;
-        state.data.messages[ch.id] = after;
-        state.save();
-      }
-      console.log(`    ${count} mesaj`);
     }
-    total += count;
-  }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, AYARLAR.paralelKanal) }, worker));
   return total;
 }
 
@@ -448,6 +533,10 @@ function printSummary({ source, target, categories, channels, copyRoles, copyMes
   console.log(`\n"${source.name}" -> "${target.name}"`);
   console.log(`  ${categories.length} kategori, ${channels.length} kanal`);
   console.log(`  roller: ${copyRoles ? 'evet' : 'hayir'}, mesajlar: ${copyMessages ? 'evet' : 'hayir'}`);
+  if (copyMessages) {
+    const limit = AYARLAR.mesajLimiti > 0 ? `kanal basina en son ${AYARLAR.mesajLimiti}` : 'hepsi';
+    console.log(`  mesaj: ${limit}, ayni anda ${AYARLAR.paralelKanal} kanal, birlestirme: ${AYARLAR.mesajBirlestir ? 'acik' : 'kapali'}`);
+  }
 }
 
 async function run(client) {

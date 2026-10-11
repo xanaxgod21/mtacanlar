@@ -7,6 +7,9 @@
 #   .\baslat.ps1 -Kaynak 1291429958895407248 -Hedef 1555467184984293416
 #   .\baslat.ps1 -Kaynak 111 -Hedef 222 -MesajYok        # sadece kanal + rol
 #   .\baslat.ps1 -Kaynak 111 -Hedef 222 -RolYok -TarihYok
+#   .\baslat.ps1 -Kaynak 111 -Hedef 222 -Limit 500         # kanal basina en son 500 mesaj (0 = hepsi)
+#   .\baslat.ps1 -Kaynak 111 -Hedef 222 -Paralel 5         # ayni anda 5 kanal
+#   .\baslat.ps1 -Kaynak 111 -Hedef 222 -BirlestirmeYok    # ardisik mesajlari birlestirme
 #   .\baslat.ps1 -Liste                                  # sunucu/kanal listeden secilir
 #   .\baslat.ps1 -TokenSifirla                           # kayitli token'i sil, yenisini sor
 #
@@ -23,6 +26,9 @@ param(
     [switch]$RolYok,
     [switch]$MesajYok,
     [switch]$TarihYok,
+    [int]$Limit = -1,
+    [int]$Paralel = 3,
+    [switch]$BirlestirmeYok,
     [switch]$Liste,
     [switch]$TokenSifirla
 )
@@ -118,6 +124,12 @@ if ($Liste) {
         if (-not $RolYok) { $roller = Read-YesNo 'Roller kopyalansin mi?' }
         if (-not $MesajYok) { $mesajlar = Read-YesNo 'Mesajlar aktarilsin mi?' }
         if ($mesajlar -and -not $TarihYok) { $tarih = Read-YesNo 'Mesajlarin altina orijinal tarihi eklensin mi?' }
+        while ($mesajlar -and $Limit -lt 0) {
+            $cevap = (Read-Host 'Kanal basina en fazla kac mesaj? En yenileri alinir [Enter = 200, 0 = hepsi]').Trim()
+            if (-not $cevap) { $Limit = 200 }
+            elseif ($cevap -match '^\d+$') { $Limit = [int]$cevap }
+            else { Write-Host 'Sayi girmelisin.' -ForegroundColor Yellow }
+        }
     }
 }
 
@@ -143,6 +155,11 @@ $env:SUNUCU_LISTE = if ($Kaynak) { $null } else { '1' }
 $env:ROLLERI_KOPYALA = if ($roller) { '1' } else { '0' }
 $env:MESAJLARI_KOPYALA = if ($mesajlar) { '1' } else { '0' }
 $env:TARIH_EKLE = if ($tarih) { '1' } else { '0' }
+if ($Limit -lt 0) { $Limit = 200 }
+if ($Paralel -lt 1) { $Paralel = 1 }
+$env:MESAJ_LIMITI = "$Limit"
+$env:PARALEL_KANAL = "$Paralel"
+$env:MESAJ_BIRLESTIR = if ($BirlestirmeYok) { '0' } else { '1' }
 
 # ----------------- calistir -----------------
 
