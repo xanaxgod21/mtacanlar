@@ -5,3 +5,4 @@ build/
 __pycache__/
 node_modules/
 sunucu_kopyala/ilerleme_*.json
+sunucu_kopyala.zip
