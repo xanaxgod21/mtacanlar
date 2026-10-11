@@ -61,6 +61,20 @@ $env:DISCORD_TOKEN = "TOKEN"                                                # sa
 [Environment]::SetEnvironmentVariable('DISCORD_TOKEN', 'TOKEN', 'User')     # kalıcı
 ```
 
+## Ayarlar
+
+`baslat.ps1` ile verdiğin değerler bu ayarların yerine geçer. Aşağıdakiler `node index.js` ile doğrudan çalıştırdığında geçerli olan varsayılanlar. `index.js` dosyasının başındaki `AYARLAR` bölümünden değiştirebilirsin.
+
+| Ayar | Varsayılan | Açıklama |
+|---|---|---|
+| `kaynakSunucu` | `1291429958895407248` | Çekilecek (eski) sunucu |
+| `hedefSunucu` | `1555467184984293416` | Aktarılacak (yeni) sunucu |
+| `rolleriKopyala` | `true` | Roller de kopyalansın mı |
+| `mesajlariKopyala` | `true` | Mesajlar da taşınsın mı |
+| `tarihEkle` | `true` | Her mesajın altına orijinal tarihini küçük yazıyla ekler |
+| `bekleme` | `1500` | Kanal/rol oluşturma arası bekleme (ms) |
+| `mesajBekleme` | `1200` | Mesajlar arası bekleme (ms) |
+
 ## Ne yapar
 
 1. **Roller:** isim, renk, ayrı gösterim, izinler ve sıra, ayrıca `@everyone` izinleri. Hedefte aynı isimde rol zaten varsa yenisini açmaz, onu kullanır. Bot rollerini atlar.
