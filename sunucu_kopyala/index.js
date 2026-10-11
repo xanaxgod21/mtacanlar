@@ -47,7 +47,7 @@ const AYARLAR = {
   rolleriKopyala: flag('ROLLERI_KOPYALA', true),
   mesajlariKopyala: flag('MESAJLARI_KOPYALA', true),
   tarihEkle: flag('TARIH_EKLE', true), // mesajin altina orijinal tarihini kucuk yazi olarak ekler
-  mesajLimiti: num('MESAJ_LIMITI', 200), // kanal basina en fazla bu kadar (en yeni) mesaj; 0 = hepsi
+  mesajLimiti: num('MESAJ_LIMITI', 200), // kanalda bundan fazla mesaj varsa o kanalin mesajlari atlanir; 0 = sinir yok
   mesajBirlestir: flag('MESAJ_BIRLESTIR', true), // ayni kisinin ardisik mesajlarini tek mesajda toplar
   paralelKanal: num('PARALEL_KANAL', 3), // ayni anda kac kanalin mesajlari aktarilsin
   bekleme: 1500, // kanal/rol olusturma arasi bekleme (ms)
@@ -402,29 +402,41 @@ async function getWebhook(target, channelId, hooks) {
   return target.channels.createWebhook(channelId, WEBHOOK_NAME, { reason: 'Sunucu tasima' });
 }
 
-// Bir kanalin mesajlarini aktarir. mesajLimiti > 0 ise kanalin en son o
-// kadar mesaji aktarilir, sonra siradaki kanala gecilir.
+// Bir kanalin mesajlarini aktarir. mesajLimiti > 0 ise ve kanalda bundan
+// fazla mesaj varsa kanalin mesajlari hic aktarilmaz, siradakine gecilir.
 async function copyChannelMessages(ch, target, hook, state) {
   const limit = uploadLimit(target);
   const max = AYARLAR.mesajLimiti;
   const sent = state.data.sent;
   const tag = `#${ch.name}`;
+  const finish = text => {
+    state.data.messages[ch.id] = 'bitti';
+    state.save();
+    console.log(`  ${tag}: ${text}`);
+  };
 
-  if (sent[ch.id] == null) {
-    if (state.data.messages[ch.id] && max > 0) {
-      // Limit eklenmeden onceki bir calismada aktarilmaya baslanmis kanal.
-      console.log(`  ${tag}: onceki calismada aktarilmisti, geciliyor.`);
-      state.data.messages[ch.id] = 'bitti';
-      state.save();
+  if (max > 0) {
+    if (sent[ch.id] == null && state.data.messages[ch.id]) {
+      // Limit eklenmeden onceki bir calismada aktarilmaya baslanmis (buyuk) kanal.
+      finish('onceki calismada aktarilmaya baslanmisti, atlandi.');
       return 0;
     }
-    sent[ch.id] = 0;
+    // Sadece sayi kontrolu icin en yeni max+1 mesaj okunur.
+    const latest = await fetchLatest(ch, max + 1);
+    if (latest.length > max) {
+      finish(`${max} mesajdan fazla var, atlandi.`);
+      return 0;
+    }
   }
+  sent[ch.id] ??= 0;
 
   let count = 0;
-  const sendAll = async msgs => {
-    for (const g of groupMessages(msgs)) {
-      if (max > 0 && sent[ch.id] >= max) return false;
+  let after = state.data.messages[ch.id] ?? '0';
+  while (true) {
+    const page = await ch.messages.fetch({ limit: 100, after }, { cache: false });
+    if (!page.size) break;
+    const sorted = [...page.values()].sort(byId); // eskiden yeniye
+    for (const g of groupMessages(sorted)) {
       try {
         if (await copyMessage(g.first, hook, limit, g.text)) await wait(AYARLAR.mesajBekleme);
       } catch (err) {
@@ -434,34 +446,14 @@ async function copyChannelMessages(ch, target, hook, state) {
       count += g.size;
       state.data.messages[ch.id] = g.last.id;
       state.save();
-      if (count % 25 < g.size) {
-        const of = max > 0 ? `/${max}` : '';
-        console.log(`    ${tag}: ${sent[ch.id]}${of} mesaj (${day(g.last.createdTimestamp)})`);
-      }
+      if (count % 25 < g.size) console.log(`    ${tag}: ${sent[ch.id]} mesaj (${day(g.last.createdTimestamp)})`);
     }
-    return true;
-  };
-
-  if (max > 0) {
-    const last = state.data.messages[ch.id];
-    const msgs = (await fetchLatest(ch, max)).filter(m => !last || BigInt(m.id) > BigInt(last));
-    await sendAll(msgs.slice(0, Math.max(0, max - sent[ch.id])));
-  } else {
-    let after = state.data.messages[ch.id] ?? '0';
-    while (true) {
-      const page = await ch.messages.fetch({ limit: 100, after }, { cache: false });
-      if (!page.size) break;
-      const sorted = [...page.values()].sort(byId); // eskiden yeniye
-      if (!(await sendAll(sorted))) break;
-      after = sorted[sorted.length - 1].id;
-      state.data.messages[ch.id] = after;
-      state.save();
-    }
+    after = sorted[sorted.length - 1].id;
+    state.data.messages[ch.id] = after;
+    state.save();
   }
 
-  state.data.messages[ch.id] = 'bitti';
-  state.save();
-  console.log(`  ${tag}: bitti (${sent[ch.id]} mesaj).`);
+  finish(`bitti (${sent[ch.id]} mesaj).`);
   return count;
 }
 
@@ -534,7 +526,7 @@ function printSummary({ source, target, categories, channels, copyRoles, copyMes
   console.log(`  ${categories.length} kategori, ${channels.length} kanal`);
   console.log(`  roller: ${copyRoles ? 'evet' : 'hayir'}, mesajlar: ${copyMessages ? 'evet' : 'hayir'}`);
   if (copyMessages) {
-    const limit = AYARLAR.mesajLimiti > 0 ? `kanal basina en son ${AYARLAR.mesajLimiti}` : 'hepsi';
+    const limit = AYARLAR.mesajLimiti > 0 ? `${AYARLAR.mesajLimiti}'den fazla mesaji olan kanallar atlanir` : 'hepsi';
     console.log(`  mesaj: ${limit}, ayni anda ${AYARLAR.paralelKanal} kanal, birlestirme: ${AYARLAR.mesajBirlestir ? 'acik' : 'kapali'}`);
   }
 }

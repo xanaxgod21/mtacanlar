@@ -7,7 +7,7 @@
 #   .\baslat.ps1 -Kaynak 1291429958895407248 -Hedef 1555467184984293416
 #   .\baslat.ps1 -Kaynak 111 -Hedef 222 -MesajYok        # sadece kanal + rol
 #   .\baslat.ps1 -Kaynak 111 -Hedef 222 -RolYok -TarihYok
-#   .\baslat.ps1 -Kaynak 111 -Hedef 222 -Limit 500         # kanal basina en son 500 mesaj (0 = hepsi)
+#   .\baslat.ps1 -Kaynak 111 -Hedef 222 -Limit 500         # 500'den fazla mesaji olan kanallari atla (0 = atlama)
 #   .\baslat.ps1 -Kaynak 111 -Hedef 222 -Paralel 5         # ayni anda 5 kanal
 #   .\baslat.ps1 -Kaynak 111 -Hedef 222 -BirlestirmeYok    # ardisik mesajlari birlestirme
 #   .\baslat.ps1 -Liste                                  # sunucu/kanal listeden secilir
@@ -125,7 +125,7 @@ if ($Liste) {
         if (-not $MesajYok) { $mesajlar = Read-YesNo 'Mesajlar aktarilsin mi?' }
         if ($mesajlar -and -not $TarihYok) { $tarih = Read-YesNo 'Mesajlarin altina orijinal tarihi eklensin mi?' }
         while ($mesajlar -and $Limit -lt 0) {
-            $cevap = (Read-Host 'Kanal basina en fazla kac mesaj? En yenileri alinir [Enter = 200, 0 = hepsi]').Trim()
+            $cevap = (Read-Host 'Kac mesajdan fazlasi olan kanallar atlansin? [Enter = 200, 0 = hicbirini atlama]').Trim()
             if (-not $cevap) { $Limit = 200 }
             elseif ($cevap -match '^\d+$') { $Limit = [int]$cevap }
             else { Write-Host 'Sayi girmelisin.' -ForegroundColor Yellow }

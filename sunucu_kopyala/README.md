@@ -21,7 +21,7 @@ Parametresiz çalıştırırsan sırayla şunları sorar:
 2. Çekilecek (eski) sunucu ID'si.
 3. Aktarılacak (yeni) sunucu ID'si.
 4. Roller kopyalansın mı, mesajlar aktarılsın mı, mesajlara tarih eklensin mi.
-5. Kanal başına en fazla kaç mesaj aktarılsın (Enter = 200, 0 = hepsi).
+5. Kaç mesajdan fazlası olan kanallar atlansın (Enter = 200, 0 = hiçbirini atlama).
 
 Sunucu sorularında **Enter**'a basarsan son kullandığın ID geçerli olur. **L** yazarsan program sunucuları ve kanalları listeleyip seçtirir.
 
@@ -40,7 +40,7 @@ Böyle çalıştırırsan hiçbir şey sormadan başlar:
 | `-RolYok` | Rolleri kopyalama |
 | `-MesajYok` | Mesajları aktarma, sadece kanal ve rol |
 | `-TarihYok` | Mesajların altına orijinal tarihi ekleme |
-| `-Limit <sayı>` | Kanal başına en fazla bu kadar mesaj, en yenileri alınır (varsayılan 200, `0` = hepsi) |
+| `-Limit <sayı>` | Bundan fazla mesajı olan kanalların mesajlarını hiç aktarma (varsayılan 200, `0` = hiçbirini atlama) |
 | `-Paralel <sayı>` | Aynı anda kaç kanalın mesajları aktarılsın (varsayılan 3) |
 | `-BirlestirmeYok` | Aynı kişinin arka arkaya mesajlarını birleştirme |
 | `-Liste` | Sunucuları ve kanalları programda listeden seç |
@@ -76,7 +76,7 @@ $env:DISCORD_TOKEN = "TOKEN"                                                # sa
 | `rolleriKopyala` | `true` | Roller de kopyalansın mı |
 | `mesajlariKopyala` | `true` | Mesajlar da taşınsın mı |
 | `tarihEkle` | `true` | Her mesajın altına orijinal tarihini küçük yazıyla ekler |
-| `mesajLimiti` | `200` | Kanal başına en fazla bu kadar (en yeni) mesaj; `0` = hepsi |
+| `mesajLimiti` | `200` | Bundan fazla mesajı olan kanalların mesajları atlanır; `0` = sınır yok |
 | `mesajBirlestir` | `true` | Aynı kişinin 7 dakika içindeki ardışık yazı mesajlarını tek mesajda toplar |
 | `paralelKanal` | `3` | Aynı anda kaç kanalın mesajları aktarılsın |
 | `bekleme` | `1500` | Kanal/rol oluşturma arası bekleme (ms) |
@@ -86,7 +86,7 @@ $env:DISCORD_TOKEN = "TOKEN"                                                # sa
 
 1. **Roller:** isim, renk, ayrı gösterim, izinler ve sıra, ayrıca `@everyone` izinleri. Hedefte aynı isimde rol zaten varsa yenisini açmaz, onu kullanır. Bot rollerini atlar.
 2. **Kategoriler ve kanallar:** yazı, ses, duyuru, sahne, forum ve medya kanalları. Konu, NSFW, yavaş mod, bitrate, kişi limiti, forum etiketleri ve kanal izinleri de gelir.
-3. **Mesajlar:** varsayılan olarak her kanalın **en son 200 mesajını** eskiden yeniye taşır, sonra sıradaki kanala geçer (`-Limit` ile değiştirilebilir). Aynı anda 3 kanal işlenir. Aynı kişinin arka arkaya attığı yazı mesajları, Discord'un ekranda gösterdiği gibi tek mesajda birleştirilir. Mesajlar webhook ile gönderilir, bu yüzden her mesaj **orijinal yazarın adı ve profil fotoğrafıyla** görünür. Dosyalar ve bot embed'leri de gelir.
+3. **Mesajlar:** 200 veya daha az mesajı olan kanalların bütün mesajlarını eskiden yeniye taşır. **200'den fazla mesajı olan kanalların mesajlarını hiç aktarmaz**, kanal boş açılır ve sıradaki kanala geçilir (`-Limit` ile değiştirilebilir). Aynı anda 3 kanal işlenir. Aynı kişinin arka arkaya attığı yazı mesajları, Discord'un ekranda gösterdiği gibi tek mesajda birleştirilir. Mesajlar webhook ile gönderilir, bu yüzden her mesaj **orijinal yazarın adı ve profil fotoğrafıyla** görünür. Dosyalar ve bot embed'leri de gelir.
    - Hiç kimse etiketlenmez. `@everyone`, rol ve kişi etiketleri yazı olarak kalır ama bildirim gitmez.
    - Hedef sunucunun yükleme sınırını (boost yoksa 10 MB) aşan dosyalar link olarak gönderilir.
    - Sistem mesajları (katıldı, sabitlendi vb.) atlanır.
@@ -105,7 +105,7 @@ $env:DISCORD_TOKEN = "TOKEN"                                                # sa
 
 Discord, webhook'la bir kanala dakikada yaklaşık 30 mesaj gönderilmesine izin veriyor. Bu sınır aşılamaz. Hızı artıran üç şey var:
 
-- **Mesaj sınırı:** varsayılan 200 mesajla bir kanal en fazla birkaç dakika sürer.
+- **Mesaj sınırı:** 200'den fazla mesajı olan kanallar atlandığı için bir kanal en fazla birkaç dakika sürer.
 - **Birleştirme:** aynı kişinin ardışık mesajları tek gönderimde gider. Sohbet kanallarında gönderim sayısı genelde yarıya ya da üçte bire iner.
 - **Paralel kanallar:** sınır kanal başına olduğu için 3 kanal aynı anda aktarılır.
 
