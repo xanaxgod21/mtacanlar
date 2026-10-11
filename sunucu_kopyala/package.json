@@ -1,6 +1,6 @@
 {
   "name": "sunucu-kopyala",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "private": true,
   "description": "Bir Discord sunucusundaki secilen kanallari ve rolleri baska bir sunucuya kopyalar",
   "main": "index.js",

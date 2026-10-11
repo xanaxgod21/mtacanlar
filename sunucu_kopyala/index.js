@@ -55,6 +55,7 @@ const AYARLAR = {
 };
 // -------------------------------------------
 
+const SURUM = '1.3.0 (200+ mesajli kanallari atlar)';
 const WEBHOOK_NAME = 'Sunucu Tasima';
 
 const rl = readline.createInterface({ input: stdin, output: stdout });
@@ -608,6 +609,7 @@ async function run(client) {
 }
 
 async function main() {
+  console.log(`Sunucu kopyalayici surum ${SURUM}`);
   const token = process.env.DISCORD_TOKEN || (await ask('Hesap token: '));
   const client = new Client();
   const ready = new Promise(resolve => client.once('ready', resolve));
