@@ -35,12 +35,16 @@ const { stdin, stdout } = require('node:process');
 const { Client } = require('discord.js-selfbot-v13');
 
 // ----------------- AYARLAR -----------------
+// baslat.ps1 bunlari ortam degiskenleriyle (KAYNAK_SUNUCU, HEDEF_SUNUCU,
+// ROLLERI_KOPYALA, MESAJLARI_KOPYALA, TARIH_EKLE, SUNUCU_LISTE) ezer.
+const listMode = process.env.SUNUCU_LISTE === '1';
+const flag = (name, def) => (process.env[name] == null ? def : process.env[name] !== '0');
 const AYARLAR = {
-  kaynakSunucu: process.env.KAYNAK_SUNUCU ?? '1291429958895407248', // bos ('') birakirsan sorar
-  hedefSunucu: process.env.HEDEF_SUNUCU ?? '1555467184984293416',
-  rolleriKopyala: true,
-  mesajlariKopyala: true,
-  tarihEkle: true, // mesajin altina orijinal tarihini kucuk yazi olarak ekler
+  kaynakSunucu: listMode ? '' : process.env.KAYNAK_SUNUCU ?? '1291429958895407248', // bos ('') birakirsan sorar
+  hedefSunucu: listMode ? '' : process.env.HEDEF_SUNUCU ?? '1555467184984293416',
+  rolleriKopyala: flag('ROLLERI_KOPYALA', true),
+  mesajlariKopyala: flag('MESAJLARI_KOPYALA', true),
+  tarihEkle: flag('TARIH_EKLE', true), // mesajin altina orijinal tarihini kucuk yazi olarak ekler
   bekleme: 1500, // kanal/rol olusturma arasi bekleme (ms)
   mesajBekleme: 1200, // mesajlar arasi bekleme (ms); hesabi korumak icin dusurme
 };

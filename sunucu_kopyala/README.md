@@ -8,46 +8,58 @@ Bir Discord sunucusundaki kategori, kanal, rol ve **mesajları** başka bir sunu
 
 Node.js 20.18 veya üstü kurulu olmalı: https://nodejs.org
 
-`baslat.bat` dosyasına çift tıkla. Ya da PowerShell'de:
+PowerShell'de klasöre girip çalıştır:
 
 ```powershell
 cd sunucu_kopyala
-.\baslat.ps1
-```
-
-- İlk çalıştırmada token'ı sorar. Yazarken ekranda görünmez.
-- Kaydedilsin mi diye sorar. **e** dersen Windows kullanıcı ortam değişkenine (`DISCORD_TOKEN`) kaydeder ve bir daha sormaz.
-- Paketler kurulu değilse `npm install` kendisi çalışır.
-- Token'ı değiştirmek ya da silmek için: `.\baslat.ps1 -TokenSifirla`
-
-"running scripts is disabled" hatası alırsan şöyle çalıştır:
-
-```powershell
 powershell -ExecutionPolicy Bypass -File .\baslat.ps1
 ```
 
-Token'ı PowerShell'den elle de ayarlayabilirsin:
+Parametresiz çalıştırırsan sırayla şunları sorar:
+
+1. Token. İlk seferde sorar, kaydedersen bir daha sormaz.
+2. Çekilecek (eski) sunucu ID'si.
+3. Aktarılacak (yeni) sunucu ID'si.
+4. Roller kopyalansın mı, mesajlar aktarılsın mı, mesajlara tarih eklensin mi.
+
+Sunucu sorularında **Enter**'a basarsan son kullandığın ID geçerli olur. **L** yazarsan program sunucuları ve kanalları listeleyip seçtirir.
+
+### Her şeyi komutla vermek
+
+Böyle çalıştırırsan hiçbir şey sormadan başlar:
+
+```powershell
+.\baslat.ps1 -Kaynak 1291429958895407248 -Hedef 1555467184984293416
+```
+
+| Parametre | Ne yapar |
+|---|---|
+| `-Kaynak <ID>` | Çekilecek (eski) sunucu |
+| `-Hedef <ID>` | Aktarılacak (yeni) sunucu |
+| `-RolYok` | Rolleri kopyalama |
+| `-MesajYok` | Mesajları aktarma, sadece kanal ve rol |
+| `-TarihYok` | Mesajların altına orijinal tarihi ekleme |
+| `-Liste` | Sunucuları ve kanalları programda listeden seç |
+| `-TokenSifirla` | Kayıtlı token'ı silip yenisini sor |
+
+Örnekler:
+
+```powershell
+.\baslat.ps1 -Kaynak 111... -Hedef 222... -MesajYok      # sadece kanallar ve roller
+.\baslat.ps1 -Kaynak 111... -Hedef 222... -RolYok         # roller hariç her şey
+.\baslat.ps1 -Liste                                       # belirli kanalları seçmek için
+```
+
+Sunucu ID'sini almak için Discord'da Ayarlar > Gelişmiş > Geliştirici Modu'nu aç. Sonra sunucuya sağ tıklayıp **Sunucu ID'sini Kopyala**'ya bas.
+
+`baslat.bat` dosyasına çift tıklarsan da aynısı olur, soruları sorar.
+
+### Token'ı elle ayarlamak
 
 ```powershell
 $env:DISCORD_TOKEN = "TOKEN"                                                # sadece bu pencere için
-[Environment]::SetEnvironmentVariable('DISCORD_TOKEN', 'TOKEN', 'User')     # kalıcı (yeni pencerelerde geçerli)
+[Environment]::SetEnvironmentVariable('DISCORD_TOKEN', 'TOKEN', 'User')     # kalıcı
 ```
-
-## Ayarlar
-
-`index.js` dosyasının başındaki `AYARLAR` bölümünden değiştirebilirsin:
-
-| Ayar | Varsayılan | Açıklama |
-|---|---|---|
-| `kaynakSunucu` | `1291429958895407248` | Kopyalanacak (eski) sunucu |
-| `hedefSunucu` | `1555467184984293416` | Kopyalanacağı (yeni) sunucu |
-| `rolleriKopyala` | `true` | Roller de kopyalansın mı |
-| `mesajlariKopyala` | `true` | Mesajlar da taşınsın mı |
-| `tarihEkle` | `true` | Her mesajın altına orijinal tarihini küçük yazıyla ekler |
-| `bekleme` | `1500` | Kanal/rol oluşturma arası bekleme (ms) |
-| `mesajBekleme` | `1200` | Mesajlar arası bekleme (ms) |
-
-İki sunucu ID'si de doluysa program **çalıştırdığın an hiçbir şey sormadan** her şeyi taşır. İkisini de boş (`''`) bırakırsan sunucuları ve kanalları tek tek seçtirir. Sunucuları `KAYNAK_SUNUCU` ve `HEDEF_SUNUCU` ortam değişkenleriyle de verebilirsin.
 
 ## Ne yapar
 
