@@ -1,5 +1,6 @@
 #include "config.hpp"
 
+#include <tuple>
 #include <glaze/glaze.hpp>
 #include <spdlog/spdlog.h>
 
@@ -24,9 +25,20 @@ Config::Config()
         return;
     }
 
-    // TODO: Add missing keys when new fields are added
+    // Write it back so keys added in newer versions show up with their defaults.
+    std::ignore = save();
 
     spdlog::info("Config file \"config.json\" is all loaded up and ready to go!");
+}
+
+bool Config::save() const
+{
+    if (const auto write_ec = glz::write_file_json<glz::opts{.prettify = true}>(config_, "config.json", std::string{})) {
+        spdlog::error("Failed to save configuration file: {}", glz::format_error(write_ec));
+        return false;
+    }
+
+    return true;
 }
 }
 

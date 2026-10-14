@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "../config.hpp"
 #include "../../event/event.hpp"
 #include "../../network/client.hpp"
 
@@ -19,7 +20,7 @@ public:
     static constexpr float MIN_RANGE{ 1.0f };
     static constexpr float MAX_RANGE{ 5.0f };
 
-    AutoCollectHandler(event::Dispatcher& dispatcher, network::Client& client);
+    AutoCollectHandler(event::Dispatcher& dispatcher, network::Client& client, Config& config);
 
     AutoCollectHandler(const AutoCollectHandler&) = delete;
     AutoCollectHandler& operator=(const AutoCollectHandler&) = delete;
@@ -61,6 +62,7 @@ private:
 
     event::Dispatcher& dispatcher_;
     network::Client& client_;
+    Config& config_;
 
     bool enabled_{ false };
     float range_{ DEFAULT_RANGE };

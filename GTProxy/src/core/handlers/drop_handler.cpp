@@ -2,38 +2,44 @@
 
 #include <charconv>
 #include <fmt/format.h>
-#include <magic_enum/magic_enum.hpp>
 #include <spdlog/spdlog.h>
 
-#include "../../packet/game/dialog.hpp"
+#include "../../item/lock_conversion.hpp"
+#include "../../packet/game/inventory.hpp"
 #include "../../packet/message/chat.hpp"
+#include "../../packet/message/raw_text.hpp"
 #include "../../packet/packet_helper.hpp"
-#include "../../utils/byte_stream.hpp"
 #include "../../world/world.hpp"
 
 namespace core::handlers {
-DropHandler::DropHandler(
-    event::Dispatcher& dispatcher,
-    network::Client& client,
-    network::Server& server,
-    std::shared_ptr<Scheduler> scheduler,
-    AutoCollectHandler& auto_collect
-)
-    : dispatcher_{ dispatcher }
-    , client_{ client }
-    , server_{ server }
-    , scheduler_{ std::move(scheduler) }
-    , auto_collect_{ auto_collect }
+namespace {
+template <typename T>
+std::optional<T> parse_number(const std::string_view text)
 {
-    constexpr auto dialog_type{ event::packet_event_type(packet::PacketId::OnDialogRequest) };
-    handles_.emplace_back(
-        dispatcher_,
-        dialog_type,
-        dispatcher_.append_listener(dialog_type, [this](const event::Event& event) { on_dialog_request(event); })
-    );
+    T value{};
+    if (auto [ptr, ec]{ std::from_chars(text.data(), text.data() + text.size(), value) }; ec != std::errc{} || ptr != text.data() + text.size()) {
+        return std::nullopt;
+    }
+
+    return value;
+}
 }
 
-DropHandler::Result DropHandler::request_drop(const std::uint16_t item_id, const int amount, std::string item_name)
+DropHandler::DropHandler(
+    network::Client& client,
+    network::Server& server,
+    DialogInterceptor& dialogs,
+    AutoCollectHandler& auto_collect
+)
+    : client_{ client }
+    , server_{ server }
+    , dialogs_{ dialogs }
+    , auto_collect_{ auto_collect }
+{
+
+}
+
+DropHandler::Result DropHandler::request_drop(const std::uint16_t item_id, const int amount, const std::string& item_name)
 {
     if (amount < 1 || amount > MAX_AMOUNT) {
         return Result::InvalidAmount;
@@ -47,110 +53,92 @@ DropHandler::Result DropHandler::request_drop(const std::uint16_t item_id, const
         return Result::NotInWorld;
     }
 
-    if (!send_generic_text(fmt::format("action|drop\n|itemID|{}", item_id))) {
-        return Result::NotConnected;
+    auto& inventory{ player::Inventory::instance() };
+    const auto plan{ item::locks::plan_conversion(item_id, amount, inventory) };
+    if (!plan) {
+        start_drop(item_id, amount, item_name);
+        return Result::Sent;
     }
 
-    const auto sequence{ next_sequence_++ };
-    pending_[item_id] = PendingDrop{ amount, std::move(item_name), sequence };
+    for (int i{ 0 }; i < plan->count; ++i) {
+        packet::game::ItemActivateRequest activate{};
+        activate.item_id = plan->source_item;
+        if (!packet::PacketHelper::write(activate, client_)) {
+            return Result::NotConnected;
+        }
+    }
 
-    // The timer fires on a scheduler worker; hop back to the main thread
-    // before touching any state or sending packets.
-    const auto scheduler{ scheduler_.get() };
-    scheduler_->schedule_delayed(
-        [this, scheduler, item_id, sequence] {
-            scheduler->post_to_main_thread([this, item_id, sequence] { on_timeout(item_id, sequence); });
+    // Assume it worked; the drop dialog reports the real count and corrects it.
+    inventory.add(plan->source_item, -plan->count);
+    inventory.add(item_id, plan->count * item::locks::TIER_RATIO);
+
+    spdlog::info("Drop: shattering {} x item {} before dropping {} x item {}", plan->count, plan->source_item, amount, item_id);
+    dialogs_.run_later(CONVERSION_DELAY, [this, item_id, amount, item_name] { start_drop(item_id, amount, item_name); });
+    return Result::Converting;
+}
+
+void DropHandler::start_drop(const std::uint16_t item_id, const int amount, const std::string& item_name)
+{
+    if (!send_text(fmt::format("action|drop\n|itemID|{}", item_id))) {
+        send_log(fmt::format("`4Drop failed: ``lost connection while dropping {}", item_name));
+        return;
+    }
+
+    dialogs_.expect(
+        "drop_item",
+        [this, item_id, amount, item_name](const packet::game::DialogInfo& dialog) {
+            return on_drop_dialog(dialog, item_id, amount, item_name);
         },
         DIALOG_TIMEOUT,
-        "drop"
+        [this, item_name] {
+            send_log(fmt::format("`4Drop failed: ``the server did not ask how many {} to drop. Do you have any?", item_name));
+        }
     );
 
     spdlog::info("Drop: requested drop of {} x item {}", amount, item_id);
-    return Result::Sent;
 }
 
-void DropHandler::on_dialog_request(const event::Event& event)
-{
-    if (pending_.empty()) {
-        return;
+bool DropHandler::on_drop_dialog(
+    const packet::game::DialogInfo& dialog,
+    const std::uint16_t item_id,
+    const int amount,
+    const std::string& item_name
+) {
+    const auto dialog_item{ dialog.get_embed_data("itemID") };
+    if (!dialog_item || parse_number<std::uint16_t>(*dialog_item) != item_id) {
+        // Another item's drop dialog, e.g. one the player opened by hand.
+        return false;
     }
 
-    const auto evt{ dynamic_cast<const event::TypedPacketEvent<packet::PacketId::OnDialogRequest>*>(&event) };
-    if (!evt || evt->direction != event::Direction::ClientBound) {
-        return;
+    auto& inventory{ player::Inventory::instance() };
+
+    // The amount box defaults to everything the player holds: the real count.
+    if (const auto input{ dialog.get_text_input("count") }) {
+        if (const auto owned{ parse_number<int>(*input) }) {
+            inventory.set(item_id, *owned);
+            if (*owned < amount) {
+                send_log(fmt::format("`4Not enough: ``you have `w{}`` {}, not dropping {}", *owned, item_name, amount));
+                return true;
+            }
+        }
     }
-
-    const auto pkt{ evt->get<packet::game::OnDialogRequest>() };
-    if (!pkt) {
-        return;
-    }
-
-    const auto dialog{ packet::game::parse_dialog(pkt->dialog) };
-    if (dialog.name != "drop_item") {
-        return;
-    }
-
-    const auto item_id_str{ dialog.get_embed_data("itemID") };
-    if (!item_id_str) {
-        return;
-    }
-
-    std::uint16_t item_id{ 0 };
-    if (
-        auto [ptr, ec]{ std::from_chars(item_id_str->data(), item_id_str->data() + item_id_str->size(), item_id) };
-        ec != std::errc{}
-    ) {
-        return;
-    }
-
-    const auto it{ pending_.find(item_id) };
-    if (it == pending_.end()) {
-        // A drop the player started by hand: let the dialog through.
-        return;
-    }
-
-    const auto drop{ std::move(it->second) };
-    pending_.erase(it);
-
-    // Hide the dialog from the player and answer it ourselves.
-    evt->cancel();
 
     auto_collect_.ignore_drops_of(item_id, AUTO_COLLECT_IGNORE_WINDOW);
 
-    const auto reply{ packet::game::make_dialog_return(dialog, { { "count", std::to_string(drop.amount) } }) };
-    if (!send_generic_text(reply)) {
-        send_log(fmt::format("`4Drop failed: ``lost connection while dropping {}", drop.item_name));
-        return;
+    const auto reply{ packet::game::make_dialog_return(dialog, { { "count", std::to_string(amount) } }) };
+    if (!send_text(reply)) {
+        send_log(fmt::format("`4Drop failed: ``lost connection while dropping {}", item_name));
+        return true;
     }
 
-    spdlog::info("Drop: answered drop dialog for item {} with count {}", item_id, drop.amount);
+    inventory.add(item_id, -amount);
+    spdlog::info("Drop: answered drop dialog for item {} with count {}", item_id, amount);
+    return true;
 }
 
-void DropHandler::on_timeout(const std::uint16_t item_id, const std::uint64_t sequence)
+bool DropHandler::send_text(const std::string_view text) const
 {
-    const auto it{ pending_.find(item_id) };
-    if (it == pending_.end() || it->second.sequence != sequence) {
-        return;
-    }
-
-    send_log(fmt::format(
-        "`4Drop failed: ``the server did not ask how many {} to drop. Do you have any?",
-        it->second.item_name
-    ));
-    pending_.erase(it);
-}
-
-bool DropHandler::send_generic_text(const std::string_view text) const
-{
-    // Built by hand rather than through TextParse so the text goes out exactly
-    // as the client formats it (e.g. the "\n|itemID|" line with an empty key).
-    utils::ByteStream stream{};
-    stream.write(magic_enum::enum_underlying(packet::NET_MESSAGE_GENERIC_TEXT));
-    stream.write(std::string{ text }, false);
-
-    auto data{ stream.get_data() };
-    data.push_back(static_cast<std::byte>(0x00));
-    return client_.write(data);
+    return client_.write(packet::message::make_raw_text(packet::NET_MESSAGE_GENERIC_TEXT, text));
 }
 
 void DropHandler::send_log(const std::string& msg) const

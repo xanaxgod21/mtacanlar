@@ -37,6 +37,16 @@ TEST(RouletteTest, FallsBackToWheelColors)
     EXPECT_EQ(parse_spin_message("A spun the wheel and got 36!")->color_code, "`4");
 }
 
+TEST(RouletteTest, Reme)
+{
+    EXPECT_EQ(reme(0), 0);
+    EXPECT_EQ(reme(7), 7);
+    EXPECT_EQ(reme(22), 4);
+    EXPECT_EQ(reme(19), 0);
+    EXPECT_EQ(reme(28), 0);
+    EXPECT_EQ(reme(36), 9);
+}
+
 TEST(RouletteTest, RejectsOtherMessages)
 {
     EXPECT_FALSE(parse_spin_message("Hello world").has_value());

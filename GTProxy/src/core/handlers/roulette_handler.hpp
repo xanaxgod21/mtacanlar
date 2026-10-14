@@ -1,10 +1,12 @@
 #pragma once
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "../config.hpp"
 #include "../../event/event.hpp"
 #include "../../network/server.hpp"
 
@@ -15,7 +17,7 @@ namespace core::handlers {
 // a player typing "spun the wheel" in chat has no delay, so fakes are not echoed.
 class RouletteHandler {
 public:
-    RouletteHandler(event::Dispatcher& dispatcher, network::Server& server);
+    RouletteHandler(event::Dispatcher& dispatcher, network::Server& server, Config& config);
 
     RouletteHandler(const RouletteHandler&) = delete;
     RouletteHandler& operator=(const RouletteHandler&) = delete;
@@ -23,8 +25,20 @@ public:
     RouletteHandler& operator=(RouletteHandler&&) noexcept = delete;
     ~RouletteHandler() = default;
 
+    struct SpinRecord {
+        std::string spinner;
+        int number{ 0 };
+        std::string color_code;
+        std::chrono::steady_clock::time_point time{};
+    };
+
+    static constexpr std::size_t MAX_HISTORY{ 20 };
+
     [[nodiscard]] bool is_enabled() const { return enabled_; }
-    void set_enabled(const bool enabled) { enabled_ = enabled; }
+    void set_enabled(bool enabled);
+
+    // Real spins seen in the current world, newest first.
+    [[nodiscard]] const std::deque<SpinRecord>& get_history() const { return history_; }
 
 private:
     // The talk bubble and the console message of one spin arrive together;
@@ -38,8 +52,10 @@ private:
 
     event::Dispatcher& dispatcher_;
     network::Server& server_;
+    Config& config_;
 
     bool enabled_{ true };
+    std::deque<SpinRecord> history_;
     std::string last_spin_key_;
     std::chrono::steady_clock::time_point last_spin_time_{};
 

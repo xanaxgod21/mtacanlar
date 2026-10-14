@@ -22,11 +22,20 @@ Growtopia Proxy is a free and open-source proxy for [Growtopia](https://growtopi
 - Includes a built-in http server with metadata from the Growtopia client.
 - Works well with sub-server redirection.
 - Supports packet debugging and modification.
-- Auto collect for nearby dropped items (`/autocollect`).
-- Early roulette results: shows the number the moment you (or anyone) spin, before the wheel stops (`/roulette` to toggle).
-- Fast drop for locks without the amount dialog: `/wd <amount>` (World Lock), `/dd <amount>` (Diamond Lock), `/bd <amount>` (Blue Gem Lock).
-- Includes a configuration file for customization.
-- Support for new login system.
+- Proxy commands for common chores (see below). Their on/off settings are saved in `config.json`.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/wd <n>`, `/dd <n>`, `/bd <n>` | Drop World / Diamond / Blue Gem Locks without the amount dialog. If you are short, a bigger lock is broken first (e.g. a Diamond Lock into 100 World Locks). |
+| `/balance` | Show how many locks you have and their total value in World Locks. |
+| `/autocollect [on\|off\|status\|range <1-5>]` | Pick up dropped items near you. Locks you just dropped are left alone. |
+| `/roulette [on\|off\|status]` | Show roulette results (and reme) the moment the wheel is punched, before it stops. |
+| `/spins [n]` | The last roulette spins in this world. |
+| `/modalert [on\|off\|status]` | Warn (message, overlay and sound) when a moderator or invisible player is in the world. |
+| `/pull <name>`, `/kick <name>`, `/ban <name>` | Pull, kick or world-ban a player in your world without opening the wrench menu. Names can be shortened. |
+| `/warp <world>`, `/nick`, `/skin`, `/debug`, `/proxyhelp` | Built-in utilities. |
 
 ## Download
 

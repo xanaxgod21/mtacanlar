@@ -6,6 +6,8 @@
 #include <string>
 #include <string_view>
 
+#include "color_codes.hpp"
+
 namespace utils::roulette {
 struct SpinResult {
     std::string spinner;    // Name of the player who spun, colour codes removed.
@@ -13,21 +15,13 @@ struct SpinResult {
     std::string color_code; // Growtopia colour code of the number, e.g. "`4".
 };
 
-// Removes Growtopia colour codes: a backtick followed by one character.
-[[nodiscard]] inline std::string strip_color_codes(const std::string_view text)
+using utils::strip_color_codes;
+
+// "Reme" as played in Growtopia casinos: the last digit of the sum of the
+// number's digits (22 -> 4, 28 -> 10 -> 0).
+[[nodiscard]] constexpr int reme(const int number)
 {
-    std::string result{};
-    result.reserve(text.size());
-    for (std::size_t i{ 0 }; i < text.size(); ++i) {
-        if (text[i] == '`') {
-            ++i;
-            continue;
-        }
-
-        result += text[i];
-    }
-
-    return result;
+    return (number / 10 + number % 10) % 10;
 }
 
 // Colour of a number on the wheel, used when the message carries none.

@@ -9,9 +9,12 @@
 #include "../../world/world.hpp"
 
 namespace core::handlers {
-AutoCollectHandler::AutoCollectHandler(event::Dispatcher& dispatcher, network::Client& client)
+AutoCollectHandler::AutoCollectHandler(event::Dispatcher& dispatcher, network::Client& client, Config& config)
     : dispatcher_{ dispatcher }
     , client_{ client }
+    , config_{ config }
+    , enabled_{ config.get_feature_config().auto_collect }
+    , range_{ std::clamp(config.get_feature_config().auto_collect_range, MIN_RANGE, MAX_RANGE) }
 {
     setup_handlers();
 }
@@ -20,11 +23,17 @@ void AutoCollectHandler::set_enabled(const bool enabled)
 {
     enabled_ = enabled;
     attempts_.clear();
+
+    config_.get_feature_config().auto_collect = enabled;
+    std::ignore = config_.save();
 }
 
 float AutoCollectHandler::set_range(const float range_tiles)
 {
     range_ = std::clamp(range_tiles, MIN_RANGE, MAX_RANGE);
+
+    config_.get_feature_config().auto_collect_range = range_;
+    std::ignore = config_.save();
     return range_;
 }
 

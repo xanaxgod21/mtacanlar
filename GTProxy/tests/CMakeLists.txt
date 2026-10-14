@@ -13,10 +13,13 @@ add_executable(GTProxy_tests
     packet/test_game_packets.cpp
     packet/test_packet_id.cpp
     packet/test_text_packets.cpp
+    player/test_inventory.cpp
+    player/test_staff.cpp
     utils/test_text_parse.cpp
     utils/test_byte_stream.cpp
     utils/test_roulette.cpp
-    world/test_object_finder.cpp)
+    world/test_object_finder.cpp
+    world/test_player_finder.cpp)
 
 target_include_directories(GTProxy_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src)

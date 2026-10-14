@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -12,6 +13,26 @@ namespace packet::game {
 struct DialogInfo {
     std::string name;
     std::vector<std::pair<std::string, std::string>> embed_data;
+    // "add_text_input|<name>|<label>|<default value>|..." as name -> default value.
+    std::vector<std::pair<std::string, std::string>> text_inputs;
+    // "add_button|<name>|<label>|..." names.
+    std::vector<std::string> buttons;
+
+    [[nodiscard]] std::optional<std::string> get_text_input(const std::string_view input_name) const
+    {
+        for (const auto& [name, value] : text_inputs) {
+            if (name == input_name) {
+                return value;
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    [[nodiscard]] bool has_button(const std::string_view button_name) const
+    {
+        return std::ranges::find(buttons, button_name) != buttons.end();
+    }
 
     [[nodiscard]] std::optional<std::string> get_embed_data(const std::string_view key) const
     {
@@ -25,8 +46,9 @@ struct DialogInfo {
     }
 };
 
-// Extracts the dialog name (from "end_dialog|<name>|...") and the
-// "embed_data|<key>|<value>" lines the client has to send back.
+// Extracts the dialog name (from "end_dialog|<name>|..."), the
+// "embed_data|<key>|<value>" lines the client has to send back, the text
+// inputs with their default values and the button names.
 [[nodiscard]] inline DialogInfo parse_dialog(const std::string_view dialog)
 {
     DialogInfo info{};
@@ -41,6 +63,12 @@ struct DialogInfo {
         }
         else if (tokens[0] == "embed_data" && tokens.size() >= 3) {
             info.embed_data.emplace_back(tokens[1], tokens[2]);
+        }
+        else if (tokens[0] == "add_text_input" && tokens.size() >= 4) {
+            info.text_inputs.emplace_back(tokens[1], tokens[3]);
+        }
+        else if (tokens[0] == "add_button") {
+            info.buttons.emplace_back(tokens[1]);
         }
     }
 

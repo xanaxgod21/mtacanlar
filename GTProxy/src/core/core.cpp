@@ -6,8 +6,12 @@
 #include <spdlog/spdlog.h>
 
 #include "../command/commands/auto_collect_command.hpp"
+#include "../command/commands/balance_command.hpp"
 #include "../command/commands/drop_command.hpp"
-#include "../command/commands/roulette_command.hpp"
+#include "../command/commands/spins_command.hpp"
+#include "../command/commands/toggle_command.hpp"
+#include "../command/commands/world_action_command.hpp"
+#include "../item/locks.hpp"
 #include "../packet/register_packets.hpp"
 #include "../scripting/bindings/command_bindings.hpp"
 #include "../scripting/bindings/event_bindings.hpp"
@@ -37,15 +41,15 @@ Core::Core()
     connection_handler_ = std::make_unique<handlers::ConnectionHandler>(dispatcher_, *client_, *server_, config_);
     forwarding_handler_ = std::make_unique<handlers::ForwardingHandler>(dispatcher_, *client_, *server_);
     world_handler_ = std::make_unique<handlers::WorldHandler>(dispatcher_);
-    auto_collect_handler_ = std::make_unique<handlers::AutoCollectHandler>(dispatcher_, *client_);
-    drop_handler_ = std::make_unique<handlers::DropHandler>(dispatcher_, *client_, *server_, scheduler_, *auto_collect_handler_);
-    roulette_handler_ = std::make_unique<handlers::RouletteHandler>(dispatcher_, *server_);
+    dialog_interceptor_ = std::make_unique<handlers::DialogInterceptor>(dispatcher_, scheduler_);
+    inventory_handler_ = std::make_unique<handlers::InventoryHandler>(dispatcher_);
+    auto_collect_handler_ = std::make_unique<handlers::AutoCollectHandler>(dispatcher_, *client_, config_);
+    drop_handler_ = std::make_unique<handlers::DropHandler>(*client_, *server_, *dialog_interceptor_, *auto_collect_handler_);
+    world_manage_handler_ = std::make_unique<handlers::WorldManageHandler>(*client_, *server_, *dialog_interceptor_);
+    roulette_handler_ = std::make_unique<handlers::RouletteHandler>(dispatcher_, *server_, config_);
+    mod_alert_handler_ = std::make_unique<handlers::ModAlertHandler>(dispatcher_, *server_, config_);
     command_handler_ = std::make_unique<command::CommandHandler>(config_, dispatcher_, scheduler_, *server_, *client_);
-    command_handler_->registry().add(std::make_unique<command::AutoCollectCommand>(*auto_collect_handler_));
-    command_handler_->registry().add(std::make_unique<command::DropCommand>("wd", 242, "World Lock", *drop_handler_));
-    command_handler_->registry().add(std::make_unique<command::DropCommand>("dd", 1796, "Diamond Lock", *drop_handler_));
-    command_handler_->registry().add(std::make_unique<command::DropCommand>("bd", 7188, "Blue Gem Lock", *drop_handler_));
-    command_handler_->registry().add(std::make_unique<command::RouletteCommand>(*roulette_handler_));
+    register_feature_commands();
 
     script_engine_ = std::make_unique<scripting::LuaEngine>();
 
@@ -72,6 +76,36 @@ Core::Core()
     script_loader_->load_all();
 
     spdlog::info("Core initialized successfully");
+}
+
+void Core::register_feature_commands()
+{
+    using Action = handlers::WorldManageHandler::Action;
+    auto& registry{ command_handler_->registry() };
+
+    registry.add(std::make_unique<command::AutoCollectCommand>(*auto_collect_handler_));
+    registry.add(std::make_unique<command::BalanceCommand>());
+    registry.add(std::make_unique<command::DropCommand>("wd", item::locks::WORLD_LOCK, "World Lock", *drop_handler_));
+    registry.add(std::make_unique<command::DropCommand>("dd", item::locks::DIAMOND_LOCK, "Diamond Lock", *drop_handler_));
+    registry.add(std::make_unique<command::DropCommand>("bd", item::locks::BLUE_GEM_LOCK, "Blue Gem Lock", *drop_handler_));
+    registry.add(std::make_unique<command::WorldActionCommand>(Action::Pull, *world_manage_handler_));
+    registry.add(std::make_unique<command::WorldActionCommand>(Action::Kick, *world_manage_handler_));
+    registry.add(std::make_unique<command::WorldActionCommand>(Action::Ban, *world_manage_handler_));
+    registry.add(std::make_unique<command::SpinsCommand>(*roulette_handler_));
+    registry.add(std::make_unique<command::ToggleCommand>(
+        "roulette",
+        "Show roulette results before the wheel stops",
+        "Early roulette results",
+        [this] { return roulette_handler_->is_enabled(); },
+        [this](const bool enabled) { roulette_handler_->set_enabled(enabled); }
+    ));
+    registry.add(std::make_unique<command::ToggleCommand>(
+        "modalert",
+        "Warn when a moderator is in the world",
+        "Mod alert",
+        [this] { return mod_alert_handler_->is_enabled(); },
+        [this](const bool enabled) { mod_alert_handler_->set_enabled(enabled); }
+    ));
 }
 
 Core::~Core()

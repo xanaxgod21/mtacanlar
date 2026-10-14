@@ -49,6 +49,9 @@ public:
         case core::handlers::DropHandler::Result::Sent:
             send_log(ctx, fmt::format("Dropping `2{}`` {}", amount, item_name_));
             return Result::Success;
+        case core::handlers::DropHandler::Result::Converting:
+            send_log(ctx, fmt::format("Not enough {0}s, breaking a bigger lock first, then dropping `2{1}`` {0}", item_name_, amount));
+            return Result::Success;
         case core::handlers::DropHandler::Result::NotInWorld:
             send_log(ctx, "`4Error: ``You are not in a world");
             return Result::Failed;

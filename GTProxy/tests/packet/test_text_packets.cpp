@@ -2,6 +2,7 @@
 #include "packet/message/chat.hpp"
 #include "packet/message/exit.hpp"
 #include "packet/message/input.hpp"
+#include "packet/message/raw_text.hpp"
 
 using namespace packet;
 
@@ -36,4 +37,14 @@ TEST(TextPacketTest, JoinRequestReadsWorldName)
 TEST(TextPacketTest, ValidateWorldReadsWorldName)
 {
     EXPECT_EQ(read_text<message::ValidateWorld>("action|validate_world\nname|START").world_name, "START");
+}
+
+TEST(TextPacketTest, RawTextKeepsTheExactText)
+{
+    const auto data{ message::make_raw_text(NET_MESSAGE_GENERIC_TEXT, "action|drop\n|itemID|242") };
+
+    ASSERT_EQ(data.size(), 4u + 23u + 1u);
+    EXPECT_EQ(static_cast<std::uint8_t>(data[0]), NET_MESSAGE_GENERIC_TEXT);
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(data.data()) + 4, 23), "action|drop\n|itemID|242");
+    EXPECT_EQ(data.back(), std::byte{ 0 });
 }

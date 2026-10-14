@@ -43,6 +43,7 @@ inline bool register_all_packets()
     registry.register_packet<game::TileChangeRequest>();
     registry.register_packet<game::ItemChangeObject>();
     registry.register_packet<game::ItemActivateObjectRequest>();
+    registry.register_packet<game::ItemActivateRequest>();
     registry.register_packet<game::State>();
 
     registry.register_packet<game::OnSendToServer>();

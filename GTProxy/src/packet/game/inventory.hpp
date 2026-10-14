@@ -67,4 +67,34 @@ struct ModifyItemInventory : GamePacket<PacketId::ModifyItemInventory, PACKET_MO
         return game_payload;
     }
 };
+
+// Sent by the client when an item is used from the inventory (double click),
+// e.g. to shatter a Diamond Lock into 100 World Locks.
+struct ItemActivateRequest : GamePacket<PacketId::ItemActivateRequest, PACKET_ITEM_ACTIVATE_REQUEST> {
+    int32_t item_id{ 0 };
+
+    [[nodiscard]] bool read(const Payload& payload) override
+    {
+        const auto* game_payload = std::get_if<GamePayload>(&payload);
+        if (!game_payload) {
+            return false;
+        }
+
+        game_packet = game_payload->packet;
+        item_id = game_packet.int_data;
+        return true;
+    }
+
+    [[nodiscard]] Payload write() override
+    {
+        if (item_id == 0) {
+            return Payload{};
+        }
+
+        GamePayload game_payload{};
+        game_payload.packet.type = PACKET_TYPE;
+        game_payload.packet.int_data = item_id;
+        return game_payload;
+    }
+};
 }

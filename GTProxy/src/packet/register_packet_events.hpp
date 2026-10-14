@@ -71,6 +71,10 @@ inline void register_packet_events() {
         make_event_builder<game::ItemActivateObjectRequest, PacketId::ItemActivateObjectRequest>()
     );
     registry.register_event(
+        PacketId::ItemActivateRequest,
+        make_event_builder<game::ItemActivateRequest, PacketId::ItemActivateRequest>()
+    );
+    registry.register_event(
         PacketId::State,
         make_event_builder<game::State, PacketId::State>()
     );
