@@ -338,9 +338,12 @@ void Scheduler::timer_thread()
             worker_cv_.notify_one();
         }
         else {
-            auto wait_duration = top_task.execute_at - now;
-            timer_cv_.wait_for(lock, wait_duration, [this] {
-                return !running_ || paused_;
+            // Also wake up when a task that is due earlier gets scheduled, or it
+            // would wait behind the current one. Copy the time: the queue can
+            // reallocate while waiting.
+            const auto wake_at{ top_task.execute_at };
+            timer_cv_.wait_until(lock, wake_at, [this, wake_at] {
+                return !running_ || paused_ || (!task_queue_.empty() && task_queue_.top().execute_at < wake_at);
             });
         }
     }

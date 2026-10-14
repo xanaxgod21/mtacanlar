@@ -7,6 +7,8 @@ find_package(magic_enum REQUIRED)
 find_package(spdlog REQUIRED)
 
 add_executable(GTProxy_tests
+    core/test_scheduler.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/scheduler.cpp
     packet/test_dialog.cpp
     packet/test_game_packets.cpp
     packet/test_packet_id.cpp
