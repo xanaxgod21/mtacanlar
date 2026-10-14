@@ -1,0 +1,97 @@
+#include "core.hpp"
+
+#include <chrono>
+#include <thread>
+#include <enet/enet.h>
+#include <spdlog/spdlog.h>
+
+#include "../packet/register_packets.hpp"
+#include "../scripting/bindings/command_bindings.hpp"
+#include "../scripting/bindings/event_bindings.hpp"
+#include "../scripting/bindings/logger_bindings.hpp"
+#include "../scripting/bindings/packet_bindings.hpp"
+#include "../scripting/bindings/scheduler_bindings.hpp"
+#include "../scripting/bindings/player_bindings.hpp"
+#include "../scripting/bindings/world_bindings.hpp"
+#include "../scripting/bindings/world_data_bindings.hpp"
+#include "../scripting/bindings/item_bindings.hpp"
+
+namespace core {
+Core::Core()
+    : running_{ true }
+    , scheduler_{ std::make_shared<Scheduler>() }
+{
+    if (enet_initialize() != 0) {
+        throw std::runtime_error{ "Failed to initialize ENet" };
+    }
+
+    server_ = std::make_unique<network::Server>(config_, dispatcher_);
+    client_ = std::make_unique<network::Client>(config_, dispatcher_);
+    web_server_ = std::make_unique<WebServer>(config_, dispatcher_, *client_, *server_);
+
+    packet::register_all_packets();
+
+    connection_handler_ = std::make_unique<handlers::ConnectionHandler>(dispatcher_, *client_, *server_, config_);
+    forwarding_handler_ = std::make_unique<handlers::ForwardingHandler>(dispatcher_, *client_, *server_);
+    world_handler_ = std::make_unique<handlers::WorldHandler>(dispatcher_);
+    command_handler_ = std::make_unique<command::CommandHandler>(config_, dispatcher_, scheduler_, *server_, *client_);
+
+    script_engine_ = std::make_unique<scripting::LuaEngine>();
+
+    script_scheduler_ = std::make_unique<scripting::ScriptScheduler>(*script_engine_);
+
+    script_event_bridge_ = std::make_unique<scripting::ScriptEventBridge>(
+        dispatcher_,
+        *script_engine_,
+        *client_,
+        *server_
+    );
+
+    script_engine_->register_binding(std::make_unique<scripting::bindings::CommandBindings>(*command_handler_, *server_, *client_, dispatcher_, scheduler_));
+    script_engine_->register_binding(std::make_unique<scripting::bindings::EventBindings>(*script_event_bridge_));
+    script_engine_->register_binding(std::make_unique<scripting::bindings::LoggerBindings>());
+    script_engine_->register_binding(std::make_unique<scripting::bindings::PacketBindings>(*client_, *server_));
+    script_engine_->register_binding(std::make_unique<scripting::bindings::SchedulerBindings>(*script_scheduler_));
+    script_engine_->register_binding(std::make_unique<scripting::bindings::PlayerBindings>());
+    script_engine_->register_binding(std::make_unique<scripting::bindings::WorldBindings>());
+    script_engine_->register_binding(std::make_unique<scripting::bindings::WorldDataBindings>());
+    script_engine_->register_binding(std::make_unique<scripting::bindings::ItemBindings>());
+
+    script_loader_ = std::make_unique<scripting::ScriptLoader>(*script_engine_, "scripts");
+    script_loader_->load_all();
+
+    spdlog::info("Core initialized successfully");
+}
+
+Core::~Core()
+{
+    enet_deinitialize();
+}
+
+void Core::run() const
+{
+    constexpr auto sleep_timer = std::chrono::microseconds{ 5000 };
+    auto prev = std::chrono::high_resolution_clock::now();
+    auto sleep_duration = sleep_timer;
+
+    while (running_) {
+        const auto now = std::chrono::high_resolution_clock::now();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now - prev);
+        prev = now;
+
+        sleep_duration += sleep_timer - elapsed;
+
+        server_->process();
+        client_->process();
+        script_scheduler_->update(elapsed);
+
+        if (sleep_duration > std::chrono::microseconds::zero()) {
+            std::this_thread::sleep_for(sleep_duration);
+        }
+
+        if (sleep_duration >= sleep_timer) {
+            sleep_duration = std::chrono::microseconds::zero();
+        }
+    }
+}
+}
