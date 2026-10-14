@@ -146,8 +146,10 @@ void WorldHandler::setup_tile_change_request_handler()
         dispatcher_,
         tile_change_request_type,
         dispatcher_.append_listener(tile_change_request_type, [](const event::Event& event) {
+            // The client sends a TileChangeRequest for every punch, but the tile only
+            // changes once the server broadcasts one back, so track the client-bound side only.
             const auto evt{ dynamic_cast<const event::TypedPacketEvent<packet::PacketId::TileChangeRequest>*>(&event) };
-            if (!evt) {
+            if (!evt || evt->direction != event::Direction::ClientBound) {
                 return;
             }
 
@@ -157,7 +159,13 @@ void WorldHandler::setup_tile_change_request_handler()
             }
 
             auto& world{ world::World::instance() };
-            auto& tile_map{ world.get_tile_map() };const std::uint32_t index{ static_cast<std::uint32_t>(pkt->int_x + pkt->int_y * tile_map.get_size().x) };
+            auto& tile_map{ world.get_tile_map() };
+            const auto& size{ tile_map.get_size() };
+            if (pkt->int_x < 0 || pkt->int_y < 0 || pkt->int_x >= size.x || pkt->int_y >= size.y) {
+                return;
+            }
+
+            const std::size_t index{ static_cast<std::size_t>(pkt->int_x + pkt->int_y * size.x) };
             if (index >= tile_map.get_tiles().size()) {
                 return;
             }
@@ -202,15 +210,16 @@ void WorldHandler::setup_item_change_object_handler()
                 world::Object obj{};
                 obj.pos = glm::vec2{ pkt->pos_x, pkt->pos_y };
                 obj.item_id = static_cast<std::uint16_t>(pkt->item_id);
-                obj.amount = pkt->amount;
-                obj.object_id = object_map.get_drop_id();object_map.get_objects().push_back(obj);
+                obj.amount = static_cast<std::uint8_t>(pkt->amount);
+                obj.object_id = object_map.get_drop_id();
+                object_map.get_objects().push_back(obj);
             }
             else if (pkt->object_change_type == -3) {
                 for (auto& obj : object_map.get_objects()) {
-                    if (obj.object_id == pkt->item_net_id) {
+                    if (obj.object_id == static_cast<std::uint32_t>(pkt->item_net_id)) {
                         obj.pos = glm::vec2{ pkt->pos_x, pkt->pos_y };
                         obj.item_id = static_cast<std::uint16_t>(pkt->item_id);
-                        obj.amount = pkt->amount;
+                        obj.amount = static_cast<std::uint8_t>(pkt->amount);
                         break;
                     }
                 }
@@ -219,7 +228,7 @@ void WorldHandler::setup_item_change_object_handler()
                 auto it = std::remove_if(
                     object_map.get_objects().begin(),
                     object_map.get_objects().end(),
-                    [object_id = pkt->item_net_id](const world::Object& obj) {
+                    [object_id = static_cast<std::uint32_t>(pkt->item_net_id)](const world::Object& obj) {
                         return obj.object_id == object_id;
                     }
                 );

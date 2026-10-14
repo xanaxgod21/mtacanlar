@@ -237,7 +237,7 @@ struct TileChangeRequest : GamePacket<PacketId::TileChangeRequest, PACKET_TILE_C
         }
 
         GamePayload game_payload{};
-
+        game_payload.packet.type = PACKET_TYPE;
         game_payload.packet.int_x = int_x;
         game_payload.packet.int_y = int_y;
         game_payload.packet.item_net_id = item_id;
@@ -245,13 +245,15 @@ struct TileChangeRequest : GamePacket<PacketId::TileChangeRequest, PACKET_TILE_C
     }
 };
 
+// object_change_type: -1 = new drop, -3 = existing drop changed, otherwise the
+// net id of the player that collected the drop identified by item_net_id.
 struct ItemChangeObject : GamePacket<PacketId::ItemChangeObject, PACKET_ITEM_CHANGE_OBJECT> {
-    std::uint16_t pos_x;
-    std::uint16_t pos_y;
+    float pos_x;
+    float pos_y;
     std::uint16_t item_id;
     std::uint16_t amount;
-    std::uint8_t object_change_type;
-    std::uint16_t item_net_id;
+    std::int32_t object_change_type;
+    std::int32_t item_net_id;
 
     bool read(const Payload& payload) override
     {
@@ -262,11 +264,13 @@ struct ItemChangeObject : GamePacket<PacketId::ItemChangeObject, PACKET_ITEM_CHA
 
         game_packet = game->packet;
 
-        pos_x = game_packet.int_x;
-        pos_y = game_packet.int_y;
-        object_change_type = static_cast<std::uint8_t>(game_packet.object_change_type);
-        item_net_id = static_cast<std::uint16_t>(game_packet.item_net_id);
-        amount = static_cast<std::uint16_t>(game_packet.int_data);
+        // Drops use pixel positions (floats) and carry the amount in float_var,
+        // matching the dropped object layout in the world data.
+        pos_x = game_packet.pos_x;
+        pos_y = game_packet.pos_y;
+        object_change_type = game_packet.object_change_type;
+        item_net_id = game_packet.item_net_id;
+        amount = static_cast<std::uint16_t>(game_packet.float_var);
         item_id = static_cast<std::uint16_t>(game_packet.item_id);
         return true;
     }
@@ -278,11 +282,12 @@ struct ItemChangeObject : GamePacket<PacketId::ItemChangeObject, PACKET_ITEM_CHA
         }
 
         GamePayload game_payload{};
-        game_payload.packet.int_x = pos_x;
-        game_payload.packet.int_y = pos_y;
-        game_payload.packet.object_change_type = static_cast<int32_t>(object_change_type);
-        game_payload.packet.item_net_id = static_cast<int32_t>(item_net_id);
-        game_payload.packet.int_data = static_cast<int32_t>(amount);
+        game_payload.packet.type = PACKET_TYPE;
+        game_payload.packet.pos_x = pos_x;
+        game_payload.packet.pos_y = pos_y;
+        game_payload.packet.object_change_type = object_change_type;
+        game_payload.packet.item_net_id = item_net_id;
+        game_payload.packet.float_var = static_cast<float>(amount);
         game_payload.packet.item_id = static_cast<int32_t>(item_id);
         return game_payload;
     }
