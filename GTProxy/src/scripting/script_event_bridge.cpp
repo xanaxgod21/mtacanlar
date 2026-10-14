@@ -38,6 +38,8 @@ const std::unordered_map<std::string, packet::PacketId> PACKET_ID_MAP = {
     {"ModifyItemInventory", packet::PacketId::ModifyItemInventory},
     {"TileChangeRequest", packet::PacketId::TileChangeRequest},
     {"ItemChangeObject", packet::PacketId::ItemChangeObject},
+    {"ItemActivateObjectRequest", packet::PacketId::ItemActivateObjectRequest},
+    {"State", packet::PacketId::State},
     {"OnSuperMainStartAcceptLogon", packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a},
 };
 }
@@ -173,6 +175,10 @@ void ScriptEventBridge::register_event_context_type()
                     return sol::make_object(s, static_cast<packet::game::TileChangeRequest*>(ctx.packet.get()));
                 case packet::PacketId::ItemChangeObject:
                     return sol::make_object(s, static_cast<packet::game::ItemChangeObject*>(ctx.packet.get()));
+                case packet::PacketId::ItemActivateObjectRequest:
+                    return sol::make_object(s, static_cast<packet::game::ItemActivateObjectRequest*>(ctx.packet.get()));
+                case packet::PacketId::State:
+                    return sol::make_object(s, static_cast<packet::game::State*>(ctx.packet.get()));
                 case packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a:
                     return sol::make_object(s, static_cast<packet::game::OnSuperMainStartAcceptLogonHrdxs47254722215a*>(ctx.packet.get()));
                 case packet::PacketId::Unknown:
@@ -272,6 +278,8 @@ void try_fill_typed_context(packet::PacketId pid, const event::Event& event, scr
     case packet::PacketId::SendTileUpdateData: fill_typed_context<packet::PacketId::SendTileUpdateData>(event, ctx); break;
     case packet::PacketId::TileChangeRequest: fill_typed_context<packet::PacketId::TileChangeRequest>(event, ctx); break;
     case packet::PacketId::ItemChangeObject: fill_typed_context<packet::PacketId::ItemChangeObject>(event, ctx); break;
+    case packet::PacketId::ItemActivateObjectRequest: fill_typed_context<packet::PacketId::ItemActivateObjectRequest>(event, ctx); break;
+    case packet::PacketId::State: fill_typed_context<packet::PacketId::State>(event, ctx); break;
     case packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a: fill_typed_context<packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a>(event, ctx); break;
     default: break;
     }

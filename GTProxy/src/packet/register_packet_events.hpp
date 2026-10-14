@@ -4,6 +4,7 @@
 #include "game/world.hpp"
 #include "game/item_database.hpp"
 #include "game/inventory.hpp"
+#include "game/player.hpp"
 #include "message/chat.hpp"
 #include "message/exit.hpp"
 #include "message/input.hpp"
@@ -62,6 +63,14 @@ inline void register_packet_events() {
     registry.register_event(
         PacketId::ItemChangeObject,
         make_event_builder<game::ItemChangeObject, PacketId::ItemChangeObject>()
+    );
+    registry.register_event(
+        PacketId::ItemActivateObjectRequest,
+        make_event_builder<game::ItemActivateObjectRequest, PacketId::ItemActivateObjectRequest>()
+    );
+    registry.register_event(
+        PacketId::State,
+        make_event_builder<game::State, PacketId::State>()
     );
 
     registry.register_event(

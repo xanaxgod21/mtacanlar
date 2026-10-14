@@ -49,6 +49,8 @@ public:
     [[nodiscard]] int32_t mod_state() const noexcept { return mod_state_; }
     [[nodiscard]] int32_t supermod_state() const noexcept { return supermod_state_; }
 
+    void set_position(const glm::i32vec2& position) noexcept { position_ = position; }
+
 private:
     int32_t net_id_;
     int32_t user_id_;

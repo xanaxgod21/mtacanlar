@@ -68,6 +68,10 @@ end)
 | `"client:SendToClient"` | Packet from server to client   |
 | `"server:SendToServer"` | Packet from client to server   |
 
+Packets with a parsed type can also be listened to by name, e.g. `"OnSpawn"`,
+`"SendMapData"`, `"ItemChangeObject"`, `"State"` (player movement) or
+`"ItemActivateObjectRequest"` (item pickup).
+
 ## Command Registration
 
 You can register commands from scripts in two ways. The `description` parameter is optional.
@@ -315,7 +319,7 @@ local my_net_id = world:get_local_net_id()
 | `user_id`        | number  | User ID (unique ID)                  |
 | `name`           | string  | Player name                          |
 | `country_code`   | string  | Two-letter country code (e.g., "US") |
-| `position`       | Vec2    | {x, y} coordinates in world          |
+| `position`       | Vec2    | {x, y} in pixels, kept up to date from movement packets |
 | `collision`      | Vec4    | {x, y, z, w} collision dimensions    |
 | `invisible`      | number  | Invisibility level                   |
 | `mod_state`      | number  | Moderator state                      |

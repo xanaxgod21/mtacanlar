@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 
 #include "../../event/event.hpp"
+#include "../../packet/game/player.hpp"
 #include "../../packet/game/world.hpp"
 #include "../../world/world.hpp"
 #include "../../world/object.hpp"
@@ -21,6 +22,7 @@ WorldHandler::WorldHandler(event::Dispatcher& dispatcher)
     setup_send_tile_update_data_handler();
     setup_tile_change_request_handler();
     setup_item_change_object_handler();
+    setup_state_handler();
 }
 
 void WorldHandler::setup_join_request_handler()
@@ -225,19 +227,52 @@ void WorldHandler::setup_item_change_object_handler()
                 }
             }
             else {
-                auto it = std::remove_if(
-                    object_map.get_objects().begin(),
-                    object_map.get_objects().end(),
-                    [object_id = static_cast<std::uint32_t>(pkt->item_net_id)](const world::Object& obj) {
+                auto& objects{ object_map.get_objects() };
+                const auto erase_object = [&objects](const std::uint32_t object_id) {
+                    return std::erase_if(objects, [object_id](const world::Object& obj) {
                         return obj.object_id == object_id;
-                    }
-                );
-                
-                if (it != object_map.get_objects().end()) {
-                    object_map.get_objects().erase(it, object_map.get_objects().end());
+                    }) > 0;
+                };
+
+                // The collected drop id is carried in int_data; older code read it from
+                // item_net_id, so fall back to that if nothing matched.
+                if (!erase_object(static_cast<std::uint32_t>(pkt->item_id))) {
+                    std::ignore = erase_object(static_cast<std::uint32_t>(pkt->item_net_id));
                 }
-                
+
                 // TODO: Inventory updates
+            }
+        })
+    );
+}
+
+void WorldHandler::setup_state_handler()
+{
+    constexpr auto state_type{ event::packet_event_type(packet::PacketId::State) };
+    handles_.emplace_back(
+        dispatcher_,
+        state_type,
+        dispatcher_.append_listener(state_type, [](const event::Event& event) {
+            const auto evt{ dynamic_cast<const event::TypedPacketEvent<packet::PacketId::State>*>(&event) };
+            if (!evt) {
+                return;
+            }
+
+            const auto pkt{ evt->get<packet::game::State>() };
+            if (!pkt) {
+                return;
+            }
+
+            // Server-bound state packets always describe the local player.
+            const auto& world{ world::World::instance() };
+            const auto player{
+                evt->direction == event::Direction::ServerBound
+                    ? world.get_local_player().lock()
+                    : world.get_player(pkt->net_id).lock()
+            };
+
+            if (player) {
+                player->set_position(glm::i32vec2{ static_cast<int32_t>(pkt->pos_x), static_cast<int32_t>(pkt->pos_y) });
             }
         })
     );

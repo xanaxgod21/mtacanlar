@@ -5,6 +5,7 @@
 #include "game/server.hpp"
 #include "game/world.hpp"
 #include "game/inventory.hpp"
+#include "game/player.hpp"
 #include "message/chat.hpp"
 #include "message/exit.hpp"
 #include "message/input.hpp"
@@ -39,6 +40,8 @@ inline bool register_all_packets()
     registry.register_packet<game::ModifyItemInventory>();
     registry.register_packet<game::TileChangeRequest>();
     registry.register_packet<game::ItemChangeObject>();
+    registry.register_packet<game::ItemActivateObjectRequest>();
+    registry.register_packet<game::State>();
 
     registry.register_packet<game::OnSendToServer>();
     registry.register_packet<game::OnSuperMainStartAcceptLogonHrdxs47254722215a>();

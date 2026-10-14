@@ -292,6 +292,24 @@ void PacketBindings::bind_game_packets(sol::state& lua)
         "item_net_id", &packet::game::ItemChangeObject::item_net_id
     );
 
+    lua.new_usertype<packet::game::ItemActivateObjectRequest>("ItemActivateObjectRequestPacket",
+        sol::constructors<packet::game::ItemActivateObjectRequest()>(),
+        sol::base_classes, sol::bases<packet::IPacket>(),
+        "net_id", &packet::game::ItemActivateObjectRequest::net_id,
+        "pos_x", &packet::game::ItemActivateObjectRequest::pos_x,
+        "pos_y", &packet::game::ItemActivateObjectRequest::pos_y,
+        "object_id", &packet::game::ItemActivateObjectRequest::object_id
+    );
+
+    lua.new_usertype<packet::game::State>("StatePacket",
+        sol::constructors<packet::game::State()>(),
+        sol::base_classes, sol::bases<packet::IPacket>(),
+        "net_id", &packet::game::State::net_id,
+        "pos_x", &packet::game::State::pos_x,
+        "pos_y", &packet::game::State::pos_y,
+        "game_packet", &packet::game::State::game_packet
+    );
+
     lua.new_usertype<packet::game::OnSuperMainStartAcceptLogonHrdxs47254722215a>("OnSuperMainStartAcceptLogonPacket",
         sol::constructors<packet::game::OnSuperMainStartAcceptLogonHrdxs47254722215a()>(),
         sol::base_classes, sol::bases<packet::IPacket>(),

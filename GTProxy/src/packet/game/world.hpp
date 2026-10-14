@@ -246,11 +246,12 @@ struct TileChangeRequest : GamePacket<PacketId::TileChangeRequest, PACKET_TILE_C
 };
 
 // object_change_type: -1 = new drop, -3 = existing drop changed, otherwise the
-// net id of the player that collected the drop identified by item_net_id.
+// net id of the player that collected a drop. item_id holds the item id of a new
+// drop; for a collected drop it holds the drop (object) id.
 struct ItemChangeObject : GamePacket<PacketId::ItemChangeObject, PACKET_ITEM_CHANGE_OBJECT> {
     float pos_x;
     float pos_y;
-    std::uint16_t item_id;
+    std::int32_t item_id;
     std::uint16_t amount;
     std::int32_t object_change_type;
     std::int32_t item_net_id;
@@ -271,7 +272,7 @@ struct ItemChangeObject : GamePacket<PacketId::ItemChangeObject, PACKET_ITEM_CHA
         object_change_type = game_packet.object_change_type;
         item_net_id = game_packet.item_net_id;
         amount = static_cast<std::uint16_t>(game_packet.float_var);
-        item_id = static_cast<std::uint16_t>(game_packet.item_id);
+        item_id = game_packet.item_id;
         return true;
     }
 
@@ -288,7 +289,45 @@ struct ItemChangeObject : GamePacket<PacketId::ItemChangeObject, PACKET_ITEM_CHA
         game_payload.packet.object_change_type = object_change_type;
         game_payload.packet.item_net_id = item_net_id;
         game_payload.packet.float_var = static_cast<float>(amount);
-        game_payload.packet.item_id = static_cast<int32_t>(item_id);
+        game_payload.packet.item_id = item_id;
+        return game_payload;
+    }
+};
+
+// Sent by the client to pick up a dropped object it is touching.
+struct ItemActivateObjectRequest : GamePacket<PacketId::ItemActivateObjectRequest, PACKET_ITEM_ACTIVATE_OBJECT_REQUEST> {
+    int32_t net_id{ -1 };
+    float pos_x{ 0.0f };
+    float pos_y{ 0.0f };
+    std::uint32_t object_id{ 0 };
+
+    bool read(const Payload& payload) override
+    {
+        const auto game{ get_payload_if<GamePayload>(payload) };
+        if (!game) {
+            return false;
+        }
+
+        game_packet = game->packet;
+        net_id = static_cast<int32_t>(game_packet.net_id);
+        pos_x = game_packet.pos_x;
+        pos_y = game_packet.pos_y;
+        object_id = static_cast<std::uint32_t>(game_packet.int_data);
+        return true;
+    }
+
+    Payload write() override
+    {
+        if (object_id == 0) {
+            return {};
+        }
+
+        GamePayload game_payload{};
+        game_payload.packet.type = PACKET_TYPE;
+        game_payload.packet.net_id = static_cast<std::uint32_t>(net_id);
+        game_payload.packet.pos_x = pos_x;
+        game_payload.packet.pos_y = pos_y;
+        game_payload.packet.int_data = static_cast<int32_t>(object_id);
         return game_payload;
     }
 };

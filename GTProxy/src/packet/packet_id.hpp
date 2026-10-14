@@ -28,6 +28,8 @@ enum class PacketId : std::uint32_t {
     SendInventoryState,
     ModifyItemInventory,
     ItemChangeObject,
+    State,
+    ItemActivateObjectRequest,
     Padding3 = 0x3000,
     OnSendToServer,
     OnSpawn,
@@ -81,6 +83,8 @@ inline const std::unordered_map<PacketType, PacketId> GAME_PACKET_MAP = {
     { PACKET_SEND_INVENTORY_STATE, PacketId::SendInventoryState },
     { PACKET_MODIFY_ITEM_INVENTORY, PacketId::ModifyItemInventory },
     { PACKET_ITEM_CHANGE_OBJECT, PacketId::ItemChangeObject },
+    { PACKET_STATE, PacketId::State },
+    { PACKET_ITEM_ACTIVATE_OBJECT_REQUEST, PacketId::ItemActivateObjectRequest },
 };
 
 [[nodiscard]] inline PacketId derive_packet_id(const TextPayload& payload)

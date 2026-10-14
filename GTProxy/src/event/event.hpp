@@ -283,8 +283,8 @@ public:
     ScopedHandle& operator=(const ScopedHandle&) = delete;
 
 private:
-    Dispatcher* dispatcher_;
-    Type type_;
-    Dispatcher::Handle handle_;
+    Dispatcher* dispatcher_{ nullptr };
+    Type type_{};
+    Dispatcher::Handle handle_{};
 };
 }
