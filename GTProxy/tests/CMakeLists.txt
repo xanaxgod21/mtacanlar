@@ -9,7 +9,8 @@ find_package(spdlog REQUIRED)
 add_executable(GTProxy_tests
     packet/test_game_packets.cpp
     utils/test_text_parse.cpp
-    utils/test_byte_stream.cpp)
+    utils/test_byte_stream.cpp
+    world/test_object_finder.cpp)
 
 target_include_directories(GTProxy_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src)

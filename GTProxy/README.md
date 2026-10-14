@@ -22,6 +22,7 @@ Growtopia Proxy is a free and open-source proxy for [Growtopia](https://growtopi
 - Includes a built-in http server with metadata from the Growtopia client.
 - Works well with sub-server redirection.
 - Supports packet debugging and modification.
+- Auto collect for nearby dropped items (`/autocollect`).
 - Includes a configuration file for customization.
 - Support for new login system.
 

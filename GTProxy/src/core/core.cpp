@@ -5,6 +5,7 @@
 #include <enet/enet.h>
 #include <spdlog/spdlog.h>
 
+#include "../command/commands/auto_collect_command.hpp"
 #include "../packet/register_packets.hpp"
 #include "../scripting/bindings/command_bindings.hpp"
 #include "../scripting/bindings/event_bindings.hpp"
@@ -34,7 +35,9 @@ Core::Core()
     connection_handler_ = std::make_unique<handlers::ConnectionHandler>(dispatcher_, *client_, *server_, config_);
     forwarding_handler_ = std::make_unique<handlers::ForwardingHandler>(dispatcher_, *client_, *server_);
     world_handler_ = std::make_unique<handlers::WorldHandler>(dispatcher_);
+    auto_collect_handler_ = std::make_unique<handlers::AutoCollectHandler>(dispatcher_, *client_);
     command_handler_ = std::make_unique<command::CommandHandler>(config_, dispatcher_, scheduler_, *server_, *client_);
+    command_handler_->registry().add(std::make_unique<command::AutoCollectCommand>(*auto_collect_handler_));
 
     script_engine_ = std::make_unique<scripting::LuaEngine>();
 
