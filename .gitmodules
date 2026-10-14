@@ -1,0 +1,10 @@
+[submodule "GTProxy/cmake/cmake-conan"]
+	path = GTProxy/cmake/cmake-conan
+	url = https://github.com/conan-io/cmake-conan
+	branch = develop2
+[submodule "GTProxy/lib/enet"]
+	path = GTProxy/lib/enet
+	url = https://github.com/ZTzTopia/enet
+[submodule "GTProxy/lib/cpp-httplib"]
+	path = GTProxy/lib/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib
