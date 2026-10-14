@@ -33,6 +33,7 @@ public:
     void stop() { running_ = false; }
 
     [[nodiscard]] Config& get_config() { return config_; }
+    [[nodiscard]] Scheduler& get_scheduler() { return *scheduler_; }
 
 private:
     void register_feature_commands();

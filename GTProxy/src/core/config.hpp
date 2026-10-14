@@ -34,12 +34,18 @@ public:
         bool mod_alert{ true };
     };
 
+    // Saved once the key is validated, so it is not asked for again.
+    struct LicenseConfig {
+        std::string key;
+    };
+
     struct WrapperConfig {
         ServerConfig server;
         ClientConfig client;
         LogConfig log;
         CommandConfig command;
         FeatureConfig features;
+        LicenseConfig license;
     };
 
 public:
@@ -53,6 +59,8 @@ public:
     [[nodiscard]] const CommandConfig& get_command_config() const { return config_.command; }
     [[nodiscard]] const FeatureConfig& get_feature_config() const { return config_.features; }
     [[nodiscard]] FeatureConfig& get_feature_config() { return config_.features; }
+    [[nodiscard]] const LicenseConfig& get_license_config() const { return config_.license; }
+    [[nodiscard]] LicenseConfig& get_license_config() { return config_.license; }
 
     // Writes the current configuration to config.json. Returns false on failure.
     bool save() const;

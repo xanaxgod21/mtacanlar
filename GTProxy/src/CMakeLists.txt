@@ -8,6 +8,7 @@ file(GLOB GTPROXY_INCLUDE_FILES
     core/handlers/*.hpp
     event/*.hpp
     item/*.hpp
+    license/*.hpp
     network/*.hpp
     packet/*.hpp
     packet/game/*.hpp
@@ -25,6 +26,7 @@ file(GLOB GTPROXY_SOURCE_FILES
     core/*.cpp
     core/handlers/*.cpp
     item/*.cpp
+    license/*.cpp
     network/*.cpp
     packet/*.cpp
     scripting/*.cpp
@@ -94,6 +96,33 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 if (DEFINED GTPROXY_BUILD_VERSION AND NOT GTPROXY_BUILD_VERSION STREQUAL "")
     target_compile_definitions(${PROJECT_NAME} PRIVATE
         GTPROXY_BUILD_VERSION=${GTPROXY_BUILD_VERSION})
+endif ()
+
+set(GTPROXY_LICENSE_SERVER "" CACHE STRING "License server URL, e.g. https://keys.example.com (empty: license check disabled)")
+set(GTPROXY_LICENSE_PUBLIC_KEY "" CACHE STRING "License server Ed25519 public key as 64 hex characters")
+
+if (NOT GTPROXY_LICENSE_SERVER STREQUAL "" AND NOT GTPROXY_LICENSE_PUBLIC_KEY STREQUAL "")
+    string(LENGTH "${GTPROXY_LICENSE_PUBLIC_KEY}" GTPROXY_LICENSE_PUBLIC_KEY_LENGTH)
+    if (NOT GTPROXY_LICENSE_PUBLIC_KEY MATCHES "^[0-9a-fA-F]+$" OR NOT GTPROXY_LICENSE_PUBLIC_KEY_LENGTH EQUAL 64)
+        message(FATAL_ERROR "GTPROXY_LICENSE_PUBLIC_KEY must be 64 hex characters")
+    endif ()
+
+    if (NOT GTPROXY_LICENSE_SERVER MATCHES "^https?://[^/]")
+        message(FATAL_ERROR "GTPROXY_LICENSE_SERVER must be an http:// or https:// URL")
+    endif ()
+
+    if (GTPROXY_LICENSE_SERVER MATCHES "^http://")
+        message(WARNING "GTPROXY_LICENSE_SERVER uses plain http://, license keys will be sent unencrypted. Use https:// for builds you hand out.")
+    endif ()
+
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        "GTPROXY_LICENSE_SERVER=\"${GTPROXY_LICENSE_SERVER}\""
+        "GTPROXY_LICENSE_PUBLIC_KEY=\"${GTPROXY_LICENSE_PUBLIC_KEY}\"")
+    message(STATUS "License check enabled (server: ${GTPROXY_LICENSE_SERVER})")
+elseif (NOT GTPROXY_LICENSE_SERVER STREQUAL "" OR NOT GTPROXY_LICENSE_PUBLIC_KEY STREQUAL "")
+    message(FATAL_ERROR "Set both GTPROXY_LICENSE_SERVER and GTPROXY_LICENSE_PUBLIC_KEY, or neither")
+else ()
+    message(STATUS "License check disabled")
 endif ()
 
 if (NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "" OR CMAKE_BUILD_TYPE STREQUAL "Debug")
