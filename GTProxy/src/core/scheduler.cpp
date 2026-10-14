@@ -435,4 +435,39 @@ void Scheduler::worker_thread()
         }
     }
 }
+
+void Scheduler::post_to_main_thread(std::function<void()> callback)
+{
+    if (!callback) {
+        return;
+    }
+
+    std::lock_guard lock(main_thread_mutex_);
+    main_thread_tasks_.push_back(std::move(callback));
+}
+
+void Scheduler::run_main_thread_tasks()
+{
+    std::vector<std::function<void()>> tasks;
+    {
+        std::lock_guard lock(main_thread_mutex_);
+        if (main_thread_tasks_.empty()) {
+            return;
+        }
+
+        tasks.swap(main_thread_tasks_);
+    }
+
+    for (auto& task : tasks) {
+        try {
+            task();
+        }
+        catch (const std::exception& e) {
+            spdlog::error("Main thread task threw exception: {}", e.what());
+        }
+        catch (...) {
+            spdlog::error("Main thread task threw unknown exception");
+        }
+    }
+}
 }

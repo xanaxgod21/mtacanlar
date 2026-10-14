@@ -77,6 +77,11 @@ public:
 
     void wait_all();
 
+    // Task callbacks run on worker threads, but ENet is not thread-safe, so
+    // anything that sends packets must hop back to the main loop through here.
+    void post_to_main_thread(std::function<void()> callback);
+    void run_main_thread_tasks();
+
 private:
     struct Task {
         TaskId id;
@@ -123,5 +128,8 @@ private:
     std::atomic<std::size_t> active_tasks_;
 
     std::condition_variable idle_cv_;
+
+    std::mutex main_thread_mutex_;
+    std::vector<std::function<void()>> main_thread_tasks_;
 };
 }

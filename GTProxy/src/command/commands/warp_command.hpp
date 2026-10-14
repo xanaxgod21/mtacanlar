@@ -45,17 +45,20 @@ public:
         packet::PacketHelper::write(log, ctx.server);
 
         const auto client{ &ctx.client };
+        const auto scheduler{ ctx.scheduler.get() };
         ctx.scheduler->schedule_delayed(
-            [client, &world_name] {
-                if (!client->is_connected()) {
-                    spdlog::warn("Client disconnected before warp could complete.");
-                    return;
-                }
+            [client, scheduler, world_name] {
+                scheduler->post_to_main_thread([client, world_name] {
+                    if (!client->is_connected()) {
+                        spdlog::warn("Client disconnected before warp could complete.");
+                        return;
+                    }
 
-                packet::message::JoinRequest join_pkt{};
-                join_pkt.world_name = world_name;
-                join_pkt.invited_world = false;
-                packet::PacketHelper::write(join_pkt, *client);
+                    packet::message::JoinRequest join_pkt{};
+                    join_pkt.world_name = world_name;
+                    join_pkt.invited_world = false;
+                    std::ignore = packet::PacketHelper::write(join_pkt, *client);
+                });
             },
             std::chrono::milliseconds{ 1750 },
             "warp",
