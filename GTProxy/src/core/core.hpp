@@ -6,6 +6,7 @@
 #include "web_server.hpp"
 #include "handlers/auto_collect_handler.hpp"
 #include "handlers/connection_handler.hpp"
+#include "handlers/drop_handler.hpp"
 #include "handlers/forwarding_handler.hpp"
 #include "handlers/world_handler.hpp"
 #include "../command/command_handler.hpp"
@@ -42,8 +43,9 @@ private:
     std::unique_ptr<handlers::ConnectionHandler> connection_handler_;
     std::unique_ptr<handlers::ForwardingHandler> forwarding_handler_;
     std::unique_ptr<handlers::WorldHandler> world_handler_;
-    // Declared before command_handler_, whose /autocollect command references it.
+    // Declared before command_handler_, whose commands reference them.
     std::unique_ptr<handlers::AutoCollectHandler> auto_collect_handler_;
+    std::unique_ptr<handlers::DropHandler> drop_handler_;
     std::unique_ptr<command::CommandHandler> command_handler_;
 
     std::unique_ptr<scripting::LuaEngine> script_engine_;

@@ -7,6 +7,7 @@ find_package(magic_enum REQUIRED)
 find_package(spdlog REQUIRED)
 
 add_executable(GTProxy_tests
+    packet/test_dialog.cpp
     packet/test_game_packets.cpp
     utils/test_text_parse.cpp
     utils/test_byte_stream.cpp

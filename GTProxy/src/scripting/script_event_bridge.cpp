@@ -2,6 +2,7 @@
 #include "../packet/generic_packets.hpp"
 #include "../packet/packet_types.hpp"
 #include "../packet/packet_variant.hpp"
+#include "../packet/game/dialog.hpp"
 #include "../packet/game/player.hpp"
 #include "../packet/game/server.hpp"
 #include "../packet/game/world.hpp"
@@ -41,6 +42,7 @@ const std::unordered_map<std::string, packet::PacketId> PACKET_ID_MAP = {
     {"ItemActivateObjectRequest", packet::PacketId::ItemActivateObjectRequest},
     {"State", packet::PacketId::State},
     {"OnSuperMainStartAcceptLogon", packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a},
+    {"OnDialogRequest", packet::PacketId::OnDialogRequest},
 };
 }
 
@@ -179,6 +181,8 @@ void ScriptEventBridge::register_event_context_type()
                     return sol::make_object(s, static_cast<packet::game::ItemActivateObjectRequest*>(ctx.packet.get()));
                 case packet::PacketId::State:
                     return sol::make_object(s, static_cast<packet::game::State*>(ctx.packet.get()));
+                case packet::PacketId::OnDialogRequest:
+                    return sol::make_object(s, static_cast<packet::game::OnDialogRequest*>(ctx.packet.get()));
                 case packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a:
                     return sol::make_object(s, static_cast<packet::game::OnSuperMainStartAcceptLogonHrdxs47254722215a*>(ctx.packet.get()));
                 case packet::PacketId::Unknown:
@@ -280,6 +284,7 @@ void try_fill_typed_context(packet::PacketId pid, const event::Event& event, scr
     case packet::PacketId::ItemChangeObject: fill_typed_context<packet::PacketId::ItemChangeObject>(event, ctx); break;
     case packet::PacketId::ItemActivateObjectRequest: fill_typed_context<packet::PacketId::ItemActivateObjectRequest>(event, ctx); break;
     case packet::PacketId::State: fill_typed_context<packet::PacketId::State>(event, ctx); break;
+    case packet::PacketId::OnDialogRequest: fill_typed_context<packet::PacketId::OnDialogRequest>(event, ctx); break;
     case packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a: fill_typed_context<packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a>(event, ctx); break;
     default: break;
     }

@@ -2,6 +2,7 @@
 
 #include "../../packet/generic_packets.hpp"
 #include "../../packet/packet_variant.hpp"
+#include "../../packet/game/dialog.hpp"
 #include "../../packet/game/inventory.hpp"
 
 namespace scripting::bindings {
@@ -299,6 +300,14 @@ void PacketBindings::bind_game_packets(sol::state& lua)
         "pos_x", &packet::game::ItemActivateObjectRequest::pos_x,
         "pos_y", &packet::game::ItemActivateObjectRequest::pos_y,
         "object_id", &packet::game::ItemActivateObjectRequest::object_id
+    );
+
+    lua.new_usertype<packet::game::OnDialogRequest>("OnDialogRequestPacket",
+        sol::constructors<packet::game::OnDialogRequest()>(),
+        sol::base_classes, sol::bases<packet::IPacket>(),
+        "dialog", &packet::game::OnDialogRequest::dialog,
+        "variant", &packet::game::OnDialogRequest::variant,
+        "game_packet", &packet::game::OnDialogRequest::game_packet
     );
 
     lua.new_usertype<packet::game::State>("StatePacket",

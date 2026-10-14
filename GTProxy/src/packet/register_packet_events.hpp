@@ -1,5 +1,6 @@
 #pragma once
 #include "packet_event_registry.hpp"
+#include "game/dialog.hpp"
 #include "game/server.hpp"
 #include "game/world.hpp"
 #include "game/item_database.hpp"
@@ -89,6 +90,10 @@ inline void register_packet_events() {
     registry.register_event(
         PacketId::OnRemove,
         make_event_builder<game::OnRemove, PacketId::OnRemove>()
+    );
+    registry.register_event(
+        PacketId::OnDialogRequest,
+        make_event_builder<game::OnDialogRequest, PacketId::OnDialogRequest>()
     );
     registry.register_event(
         PacketId::SendItemDatabaseData,

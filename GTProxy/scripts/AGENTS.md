@@ -69,8 +69,8 @@ end)
 | `"server:SendToServer"` | Packet from client to server   |
 
 Packets with a parsed type can also be listened to by name, e.g. `"OnSpawn"`,
-`"SendMapData"`, `"ItemChangeObject"`, `"State"` (player movement) or
-`"ItemActivateObjectRequest"` (item pickup).
+`"SendMapData"`, `"ItemChangeObject"`, `"State"` (player movement),
+`"ItemActivateObjectRequest"` (item pickup) or `"OnDialogRequest"` (dialogs).
 
 ## Command Registration
 

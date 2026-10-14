@@ -19,7 +19,7 @@ AutoCollectHandler::AutoCollectHandler(event::Dispatcher& dispatcher, network::C
 void AutoCollectHandler::set_enabled(const bool enabled)
 {
     enabled_ = enabled;
-    reset();
+    attempts_.clear();
 }
 
 float AutoCollectHandler::set_range(const float range_tiles)
@@ -43,11 +43,11 @@ std::size_t AutoCollectHandler::collect_nearby()
     const auto& objects{ world.get_object_map().get_objects() };
 
     // Forget objects that are gone (collected, despawned, or a new world).
-    std::erase_if(attempts_, [&objects](const auto& entry) {
-        return std::ranges::none_of(objects, [id = entry.first](const world::Object& obj) {
-            return obj.object_id == id;
-        });
-    });
+    const auto is_gone = [&objects](const std::uint32_t id) {
+        return std::ranges::none_of(objects, [id](const world::Object& obj) { return obj.object_id == id; });
+    };
+    std::erase_if(attempts_, [&is_gone](const auto& entry) { return is_gone(entry.first); });
+    std::erase_if(ignored_objects_, is_gone);
 
     const glm::vec2 position{ local_player->position() };
     const auto now{ std::chrono::steady_clock::now() };
@@ -56,6 +56,10 @@ std::size_t AutoCollectHandler::collect_nearby()
     for (const auto* object : world::find_objects_in_range(objects, position, range_)) {
         if (sent >= MAX_REQUESTS_PER_PASS) {
             break;
+        }
+
+        if (ignored_objects_.contains(object->object_id)) {
+            continue;
         }
 
         auto& attempt{ attempts_[object->object_id] };
@@ -96,9 +100,32 @@ std::size_t AutoCollectHandler::collect_nearby()
     return sent;
 }
 
+void AutoCollectHandler::ignore_drops_of(const std::uint16_t item_id, const std::chrono::milliseconds window)
+{
+    ignore_until_[item_id] = std::chrono::steady_clock::now() + window;
+}
+
+void AutoCollectHandler::track_new_drop(const std::uint16_t item_id)
+{
+    const auto it{ ignore_until_.find(item_id) };
+    if (it == ignore_until_.end()) {
+        return;
+    }
+
+    if (std::chrono::steady_clock::now() > it->second) {
+        ignore_until_.erase(it);
+        return;
+    }
+
+    // The WorldHandler has already added the drop, which got the newest id.
+    ignored_objects_.insert(world::World::instance().get_object_map().get_drop_id());
+}
+
 void AutoCollectHandler::reset()
 {
     attempts_.clear();
+    ignore_until_.clear();
+    ignored_objects_.clear();
 }
 
 template <packet::PacketId Id, typename Func>
@@ -110,14 +137,12 @@ void AutoCollectHandler::listen(const event::Direction direction, Func&& func)
         type,
         // Lower priority than the WorldHandler so the world state is already updated.
         dispatcher_.append_listener(type, [direction, func = std::forward<Func>(func)](const event::Event& event) {
-            if (
-                const auto evt{ dynamic_cast<const event::TypedPacketEvent<Id>*>(&event) };
-                !evt || evt->direction != direction
-            ) {
+            const auto evt{ dynamic_cast<const event::TypedPacketEvent<Id>*>(&event) };
+            if (!evt || evt->direction != direction) {
                 return;
             }
 
-            func();
+            func(*evt);
         }, event::Priority::FairlyLow)
     );
 }
@@ -125,12 +150,18 @@ void AutoCollectHandler::listen(const event::Direction direction, Func&& func)
 void AutoCollectHandler::setup_handlers()
 {
     // The player moved, something was dropped, or the player (re)spawned.
-    listen<packet::PacketId::State>(event::Direction::ServerBound, [this] { std::ignore = collect_nearby(); });
-    listen<packet::PacketId::ItemChangeObject>(event::Direction::ClientBound, [this] { std::ignore = collect_nearby(); });
-    listen<packet::PacketId::OnSpawn>(event::Direction::ClientBound, [this] { std::ignore = collect_nearby(); });
+    listen<packet::PacketId::State>(event::Direction::ServerBound, [this](const auto&) { std::ignore = collect_nearby(); });
+    listen<packet::PacketId::OnSpawn>(event::Direction::ClientBound, [this](const auto&) { std::ignore = collect_nearby(); });
+    listen<packet::PacketId::ItemChangeObject>(event::Direction::ClientBound, [this](const auto& evt) {
+        if (const auto pkt{ evt.template get<packet::game::ItemChangeObject>() }; pkt && pkt->object_change_type == -1) {
+            track_new_drop(static_cast<std::uint16_t>(pkt->item_id));
+        }
+
+        std::ignore = collect_nearby();
+    });
 
     // Object ids restart in every world.
-    listen<packet::PacketId::JoinRequest>(event::Direction::ServerBound, [this] { reset(); });
-    listen<packet::PacketId::SendMapData>(event::Direction::ClientBound, [this] { reset(); });
+    listen<packet::PacketId::JoinRequest>(event::Direction::ServerBound, [this](const auto&) { reset(); });
+    listen<packet::PacketId::SendMapData>(event::Direction::ClientBound, [this](const auto&) { reset(); });
 }
 }

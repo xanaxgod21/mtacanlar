@@ -35,6 +35,7 @@ enum class PacketId : std::uint32_t {
     OnSpawn,
     OnRemove,
     OnSuperMainStartAcceptLogonHrdxs47254722215a,
+    OnDialogRequest,
     Unknown = std::numeric_limits<std::uint32_t>::max(),
 };
 
@@ -72,6 +73,7 @@ inline const std::unordered_map<std::string_view, PacketId> VARIANT_FUNCTION_MAP
     { "OnNameChanged", PacketId::OnNameChanged },
     { "OnChangeSkin", PacketId::OnChangeSkin },
     { "OnSuperMainStartAcceptLogonHrdxs47254722215a", PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a },
+    { "OnDialogRequest", PacketId::OnDialogRequest },
 };
 
 inline const std::unordered_map<PacketType, PacketId> GAME_PACKET_MAP = {

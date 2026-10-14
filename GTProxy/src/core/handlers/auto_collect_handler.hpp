@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "../../event/event.hpp"
@@ -36,6 +37,10 @@ public:
     // Sends pickup requests for drops in range. Returns how many were sent.
     std::size_t collect_nearby();
 
+    // Drops of `item_id` that appear within `window` are never picked up, so
+    // items the player drops on purpose are not collected straight back.
+    void ignore_drops_of(std::uint16_t item_id, std::chrono::milliseconds window);
+
 private:
     // Requests that get no answer are retried a few times, then given up on so
     // an object the server refuses to hand over is not spammed forever.
@@ -51,6 +56,7 @@ private:
     void setup_handlers();
     template <packet::PacketId Id, typename Func>
     void listen(event::Direction direction, Func&& func);
+    void track_new_drop(std::uint16_t item_id);
     void reset();
 
     event::Dispatcher& dispatcher_;
@@ -59,6 +65,8 @@ private:
     bool enabled_{ false };
     float range_{ DEFAULT_RANGE };
     std::unordered_map<std::uint32_t, Attempt> attempts_;
+    std::unordered_map<std::uint16_t, std::chrono::steady_clock::time_point> ignore_until_;
+    std::unordered_set<std::uint32_t> ignored_objects_;
 
     std::vector<event::ScopedHandle> handles_;
 };
