@@ -30,8 +30,16 @@ WebServer::WebServer(
         return;
     }
 
-    dispatcher_.appendListener(event::Type::ClientConnect, [this](const event::Event& e) { on_client_connect(e); });
-    dispatcher_.appendListener(event::Type::ClientDisconnect, [this](const event::Event& e) { on_client_disconnect(e); });
+    handles_.emplace_back(
+        dispatcher_,
+        event::Type::ClientConnect,
+        dispatcher_.append_listener(event::Type::ClientConnect, [this](const event::Event& e) { on_client_connect(e); })
+    );
+    handles_.emplace_back(
+        dispatcher_,
+        event::Type::ClientDisconnect,
+        dispatcher_.append_listener(event::Type::ClientDisconnect, [this](const event::Event& e) { on_client_disconnect(e); })
+    );
 
     spdlog::info("HTTPS server listening on port 443");
     server_thread_ = std::thread{ &WebServer::listen_internal, this };
@@ -150,16 +158,23 @@ void WebServer::listen_internal()
 
         spdlog::info("Original server_data.php response:\n{}", text_parse);
 
-        pending_address_ = text_parse.get("server", 0);
+        const std::string address{ text_parse.get("server", 0) };
+        const std::string port_str{ text_parse.get("port", 0) };
 
-        std::string port{ text_parse.get("port", 0) };
+        std::uint16_t port{ 0 };
         if (
-            auto [ptr, ec] = std::from_chars(port.data(), port.data() + port.size(), pending_port_);
+            auto [ptr, ec] = std::from_chars(port_str.data(), port_str.data() + port_str.size(), port);
             ec != std::errc{}
         ) {
             spdlog::error("Failed to parse port from server_data.php response");
             res.status = 500;
             return true;
+        }
+
+        {
+            std::lock_guard lock{ pending_mutex_ };
+            pending_address_ = address;
+            pending_port_ = port;
         }
 
         text_parse.set("server", { "127.0.0.1" });
@@ -177,20 +192,30 @@ void WebServer::listen_internal()
 
 void WebServer::on_client_connect(const event::Event& e)
 {
-    if (pending_port_ == 65535) {
-        return;
+    std::string address{};
+    std::uint16_t port{ 65535 };
+    {
+        std::lock_guard lock{ pending_mutex_ };
+        if (pending_port_ == 65535) {
+            return;
+        }
+
+        address = std::move(pending_address_);
+        port = pending_port_;
+
+        pending_address_.clear();
+        pending_port_ = 65535;
     }
 
-    spdlog::info("Connecting to Growtopia server at {}:{}", pending_address_, pending_port_);
-
-    client_.connect(pending_address_, pending_port_);
-
-    pending_address_.clear();
-    pending_port_ = 65535;
+    spdlog::info("Connecting to Growtopia server at {}:{}", address, port);
+    if (!client_.connect(address, port)) {
+        spdlog::error("Failed to start connection to Growtopia server at {}:{}", address, port);
+    }
 }
 
 void WebServer::on_client_disconnect(const event::Event& e)
 {
+    std::lock_guard lock{ pending_mutex_ };
     pending_address_.clear();
     pending_port_ = 65535;
 }

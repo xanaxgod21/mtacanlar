@@ -1,6 +1,8 @@
 #pragma once
 #include <httplib.h>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 #include "../core/config.hpp"
 #include "../event/event.hpp"
@@ -36,7 +38,11 @@ private:
     httplib::SSLServer https_server_;
     std::thread server_thread_;
 
+    // Written by the HTTPS thread, read by the main thread on ClientConnect.
+    std::mutex pending_mutex_;
     std::string pending_address_;
     uint16_t pending_port_;
+
+    std::vector<event::ScopedHandle> handles_;
 };
 }

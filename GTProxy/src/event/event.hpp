@@ -157,9 +157,10 @@ struct TypedPacketEvent : Event {
 };
 
 
+// eventpp looks these policy functions up by name, so they must stay camelCase.
 struct EventPolicies {
-    static Type get_event(const Event& e) { return e.type; }
-    static bool can_continue_invoking(const Event& e) { return !e.canceled; }
+    static Type getEvent(const Event& e) { return e.type; }
+    static bool canContinueInvoking(const Event& e) { return !e.canceled; }
 };
 
 using BaseDispatcher = eventpp::EventDispatcher<
