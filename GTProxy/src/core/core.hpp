@@ -1,4 +1,6 @@
 #pragma once
+#include <atomic>
+
 #include "config.hpp"
 #include "scheduler.hpp"
 #include "web_server.hpp"
@@ -27,7 +29,7 @@ public:
 
 private:
     Config config_;
-    bool running_;
+    std::atomic<bool> running_;
 
     event::Dispatcher dispatcher_;
     std::shared_ptr<Scheduler> scheduler_;

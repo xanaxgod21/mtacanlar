@@ -34,7 +34,9 @@ void ConnectionHandler::setup_connection_handlers()
             }
 
             spdlog::info("Connecting to Growtopia server at {}:{}", pending_address_, pending_port_);
-            client_.connect(pending_address_, pending_port_);
+            if (!client_.connect(pending_address_, pending_port_)) {
+                spdlog::error("Failed to start connection to Growtopia server at {}:{}", pending_address_, pending_port_);
+            }
 
             pending_address_.clear();
             pending_port_ = 65535;
@@ -50,7 +52,7 @@ void ConnectionHandler::setup_connection_handlers()
             }
 
             client_.disconnect();
-            spdlog::info("Gracefully disconnect Growtopia client from proxy server");
+            spdlog::info("Gracefully disconnect proxy client from Growtopia server");
         })
     );
 
