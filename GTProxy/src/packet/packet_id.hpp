@@ -36,6 +36,9 @@ enum class PacketId : std::uint32_t {
     OnRemove,
     OnSuperMainStartAcceptLogonHrdxs47254722215a,
     OnDialogRequest,
+    OnTalkBubble,
+    OnConsoleMessage,
+    OnTextOverlay,
     Unknown = std::numeric_limits<std::uint32_t>::max(),
 };
 
@@ -55,12 +58,14 @@ inline std::vector<TextRegexPattern>& get_text_regex_patterns()
 {
     static std::vector<TextRegexPattern> patterns = []() {
         std::vector<TextRegexPattern> p;
-        p.emplace_back(R"(^action\|quit$)", PacketId::Quit);
-        p.emplace_back(R"(^action\|quit_to_exit$)", PacketId::QuitToExit);
-        p.emplace_back(R"(^action\|join_request$)", PacketId::JoinRequest);
-        p.emplace_back(R"(^action\|validate_world$)", PacketId::ValidateWorld);
+        // The action is the first line; "$" only matches at the very end of the
+        // text, so accept a newline too or multi-line packets never match.
+        p.emplace_back(R"(^action\|quit(?:\n|$))", PacketId::Quit);
+        p.emplace_back(R"(^action\|quit_to_exit(?:\n|$))", PacketId::QuitToExit);
+        p.emplace_back(R"(^action\|join_request(?:\n|$))", PacketId::JoinRequest);
+        p.emplace_back(R"(^action\|validate_world(?:\n|$))", PacketId::ValidateWorld);
         p.emplace_back(R"(^action\|input)", PacketId::Input);
-        p.emplace_back(R"(^action\|log$)", PacketId::Log);
+        p.emplace_back(R"(^action\|log(?:\n|$))", PacketId::Log);
         return p;
     }();
     return patterns;
@@ -74,6 +79,9 @@ inline const std::unordered_map<std::string_view, PacketId> VARIANT_FUNCTION_MAP
     { "OnChangeSkin", PacketId::OnChangeSkin },
     { "OnSuperMainStartAcceptLogonHrdxs47254722215a", PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a },
     { "OnDialogRequest", PacketId::OnDialogRequest },
+    { "OnTalkBubble", PacketId::OnTalkBubble },
+    { "OnConsoleMessage", PacketId::OnConsoleMessage },
+    { "OnTextOverlay", PacketId::OnTextOverlay },
 };
 
 inline const std::unordered_map<PacketType, PacketId> GAME_PACKET_MAP = {

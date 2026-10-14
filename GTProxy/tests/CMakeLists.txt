@@ -9,6 +9,8 @@ find_package(spdlog REQUIRED)
 add_executable(GTProxy_tests
     packet/test_dialog.cpp
     packet/test_game_packets.cpp
+    packet/test_packet_id.cpp
+    packet/test_text_packets.cpp
     utils/test_text_parse.cpp
     utils/test_byte_stream.cpp
     world/test_object_finder.cpp)

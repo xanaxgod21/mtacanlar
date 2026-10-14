@@ -14,7 +14,7 @@ struct Log : TextPacket<PacketId::Log> {
 
         text_parse = text->data;
         
-        msg = text_parse.get("msg", 1);
+        msg = text_parse.get("msg", 0);
         return true;
     }
 

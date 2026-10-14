@@ -82,7 +82,7 @@ struct ValidateWorld : TextPacket<PacketId::ValidateWorld> {
 
         text_parse = text->data;
         
-        world_name = text_parse.get("name", 1);
+        world_name = text_parse.get("name", 0);
         return true;
     }
 
