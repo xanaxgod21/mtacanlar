@@ -1,4 +1,4 @@
-project(Proxy)
+project(ScarfaceProxy)
 
 file(GLOB GTPROXY_INCLUDE_FILES
     *.hpp

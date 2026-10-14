@@ -1,13 +1,8 @@
-# Growtopia Proxy
+# Scarface Proxy
 
-[![Github Action](https://img.shields.io/github/actions/workflow/status/ZTzTopia/GTProxy/cmake_ci.yml?branch=develop&logo=github&logoColor=white)](https://github.com/ZTzTopia/GTProxy/actions?query=workflow%3ACI)
-[![GitHub Release](https://img.shields.io/github/v/release/ZTzTopia/GTProxy.svg?color=orange&logo=docusign&logoColor=orange)](https://github.com/ZTzTopia/GTProxy/releases/latest) 
+Scarface Proxy is a proxy for [Growtopia](https://growtopiagame.com/) that sits between the game and its servers. It lets you debug and modify packets, and adds in-game commands for common chores (fast lock drops, auto collect, early roulette results, quick pull/kick/ban and more).
 
-Growtopia Proxy is a free and open-source proxy for [Growtopia](https://growtopiagame.com/), which enables the user to debug incoming and outgoing packets and even modify them. It is a useful tool for developers who want to analyze the game's network traffic and develop custom features.
-
-> I'm just wondering if I'm having a skill issue writing this C++ code since I first started this project, or if it's because the Growtopia packet structure is pretty complicated. I've had to do a lot of rewrites and refactors. Also, the first time I made this project, it was really just for learning about networking and C++.
-
-> I do like to add a GUI like ImGui, Qt, or WebUI, but I don't have time to do it because my own Wi-Fi IP address is flagged by the Growtopia server (Indonesian players are being stupid for real. My friend said if someone is selling residential IP addresses for botting). I will add it if I'm patient enough to find a VPN that can connect to the Growtopia server without being flagged.
+It is based on [GTProxy](https://github.com/ZTzTopia/GTProxy) by ZTzTopia (MIT license, see [LICENSE](LICENSE)).
 
 ## Supported Platforms
 
@@ -39,7 +34,7 @@ Growtopia Proxy is a free and open-source proxy for [Growtopia](https://growtopi
 
 ## Download
 
-The latest application executable can be found on the [releases page](https://github.com/ZTzTopia/GTProxy/releases).
+Builds are made by the `Scarface Proxy Windows build` GitHub Actions workflow; see [KURULUM.md](KURULUM.md) (Turkish) for setup.
 
 ## Build
 
@@ -50,7 +45,7 @@ The following dependencies are required to build from source:
 
 To build from source:
 
-1. Clone the source code of this project: `git clone --recurse-submodules https://github.com/ZTzTopia/GTProxy.git`
+1. Clone the source code with its submodules (`git clone --recurse-submodules ...`, or `git submodule update --init --recursive` in an existing clone)
 2. Install Python 3.5+ (Windows only: select 'Add Python to PATH' in installer)
 3. CMake will install needed package with Conan. `pip install "conan>2.0"`
     ```shell
@@ -62,4 +57,4 @@ To build from source:
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](https://github.com/ZTzTopia/GTProxy/blob/main/LICENSE) file for details.
+This project is licensed under the MIT License, see the [LICENSE](LICENSE) file. The original copyright notice must be kept.

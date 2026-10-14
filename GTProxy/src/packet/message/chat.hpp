@@ -1,5 +1,8 @@
 #pragma once
+#include <fmt/format.h>
+
 #include "../packet_helper.hpp"
+#include "../../core/branding.hpp"
 
 namespace packet::message {
 struct Log : TextPacket<PacketId::Log> {
@@ -22,7 +25,9 @@ struct Log : TextPacket<PacketId::Log> {
     {
         utils::TextParse parse{};
         parse.add("action", "log");
-        parse.add("msg", msg);
+        // Only messages the proxy builds go through write(); the server's own
+        // log messages are forwarded as received.
+        parse.add("msg", fmt::format("{}{}", core::branding::LOG_PREFIX, msg));
         return TextPayload{ MESSAGE_TYPE, parse };
     }
 };
