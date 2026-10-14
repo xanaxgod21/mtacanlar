@@ -287,7 +287,9 @@ void PacketBindings::bind_game_packets(sol::state& lua)
         "pos_x", &packet::game::ItemChangeObject::pos_x,
         "pos_y", &packet::game::ItemChangeObject::pos_y,
         "item_id", &packet::game::ItemChangeObject::item_id,
-        "amount", &packet::game::ItemChangeObject::amount
+        "amount", &packet::game::ItemChangeObject::amount,
+        "object_change_type", &packet::game::ItemChangeObject::object_change_type,
+        "item_net_id", &packet::game::ItemChangeObject::item_net_id
     );
 
     lua.new_usertype<packet::game::OnSuperMainStartAcceptLogonHrdxs47254722215a>("OnSuperMainStartAcceptLogonPacket",

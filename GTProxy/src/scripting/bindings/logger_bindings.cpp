@@ -1,4 +1,5 @@
 #include "logger_bindings.hpp"
+#include "lua_format.hpp"
 
 namespace scripting::bindings {
 void LoggerBindings::bind(sol::state& lua)
@@ -10,8 +11,7 @@ void LoggerBindings::bind(sol::state& lua)
             return;
         }
 
-        const std::string msg{ args[0].as<std::string>() };
-        spdlog::info("[Lua] {}", msg);
+        spdlog::info("[Lua] {}", format_lua_args(args));
     });
 
     logger_table.set_function("warn", [](const sol::variadic_args& args) {
@@ -19,8 +19,7 @@ void LoggerBindings::bind(sol::state& lua)
             return;
         }
 
-        const std::string msg{ args[0].as<std::string>() };
-        spdlog::warn("[Lua] {}", msg);
+        spdlog::warn("[Lua] {}", format_lua_args(args));
     });
 
     logger_table.set_function("error", [](const sol::variadic_args& args) {
@@ -28,8 +27,7 @@ void LoggerBindings::bind(sol::state& lua)
             return;
         }
 
-        const std::string msg{ args[0].as<std::string>() };
-        spdlog::error("[Lua] {}", msg);
+        spdlog::error("[Lua] {}", format_lua_args(args));
     });
 
     logger_table.set_function("debug", [](const sol::variadic_args& args) {
@@ -37,8 +35,7 @@ void LoggerBindings::bind(sol::state& lua)
             return;
         }
 
-        const std::string msg{ args[0].as<std::string>() };
-        spdlog::debug("[Lua] {}", msg);
+        spdlog::debug("[Lua] {}", format_lua_args(args));
     });
 
     logger_table.set_function("trace", [](const sol::variadic_args& args) {
@@ -46,8 +43,7 @@ void LoggerBindings::bind(sol::state& lua)
             return;
         }
 
-        const std::string msg{ args[0].as<std::string>() };
-        spdlog::trace("[Lua] {}", msg);
+        spdlog::trace("[Lua] {}", format_lua_args(args));
     });
 
     lua["logger"] = logger_table;

@@ -25,6 +25,15 @@ local DEFAULT_INTERVAL = 200
 local MIN_INTERVAL = 50
 local MAX_INTERVAL = 5000
 
+local function stop_rainbow()
+    if current_task_id ~= nil and scheduler.is_pending(current_task_id) then
+        scheduler.cancel(current_task_id)
+        current_task_id = nil
+    end
+
+    is_active = false
+end
+
 local function send_next_color()
     local net_id = world:get_local_net_id()
     if net_id < 0 then
@@ -57,15 +66,6 @@ local function toggle_on(ctx, interval)
     send_next_color()
 
     ctx:reply("`2Rainbow effect started ``(speed: {}ms)", interval)
-end
-
-local function stop_rainbow()
-    if current_task_id ~= nil and scheduler.is_pending(current_task_id) then
-        scheduler.cancel(current_task_id)
-        current_task_id = nil
-    end
-
-    is_active = false
 end
 
 local function toggle_off(ctx)

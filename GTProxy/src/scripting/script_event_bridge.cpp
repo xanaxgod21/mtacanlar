@@ -218,7 +218,9 @@ void ScriptEventBridge::setup_event_listeners()
 
     constexpr auto event_values = magic_enum::enum_values<event::Type>();
     for (const auto type : event_values) {
-        if (type == event::Type::Max) continue;
+        // PacketEventOffset is a marker, not an event; its value equals the ServerHello
+        // packet event type, which the loop below registers.
+        if (type == event::Type::Max || type == event::Type::PacketEventOffset) continue;
 
         event_handles_[type] = dispatcher_.append_listener(
             type,

@@ -1,4 +1,5 @@
 #include "command_bindings.hpp"
+#include "lua_format.hpp"
 #include "../../packet/message/chat.hpp"
 
 namespace scripting::bindings {
@@ -20,10 +21,17 @@ void CommandBindings::bind(sol::state& lua)
             sol::table lua_ctx{ lua.create_table() };
             lua_ctx["args"] = args_table;
             lua_ctx["raw"] = ctx.raw_input;
-            lua_ctx["reply"] = [&ctx](const std::string& msg) -> bool {
-                auto log_pkt = std::make_shared<packet::message::Log>();
-                log_pkt->msg = msg;
-                return packet::PacketHelper::write(*log_pkt, ctx.server);
+            // Works as ctx:reply(fmt, ...) and ctx.reply(fmt, ...). Captures the server
+            // rather than ctx, so scripts may keep calling it after the command returns.
+            lua_ctx["reply"] = [server = &ctx.server](const sol::variadic_args& args) -> bool {
+                const std::size_t first{ args.size() > 0 && args[0].get_type() == sol::type::table ? 1u : 0u };
+                if (args.size() <= first) {
+                    return false;
+                }
+
+                packet::message::Log log_pkt{};
+                log_pkt.msg = format_lua_args(args, first);
+                return packet::PacketHelper::write(log_pkt, *server);
             };
 
             try {
@@ -82,7 +90,7 @@ void CommandBindings::bind(sol::state& lua)
     });
 
     cmd_table.set_function("get_prefix", [this]() {
-        return std::string{ 1, handler_.registry().prefix() };
+        return std::string(1, handler_.registry().prefix());
     });
 
     cmd_table.set_function("set_prefix", [this](char prefix) {

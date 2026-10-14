@@ -131,7 +131,7 @@ logger.info("Prefix changed to #")
 |---------------|----------|------------------------------------------------|
 | `ctx.args`    | table    | Parsed command arguments                       |
 | `ctx.raw`     | string   | Raw input string                               |
-| `ctx:reply()` | function | Send a message to the player (returns boolean) |
+| `ctx:reply()` | function | Send a message to the player, fmt-style args supported (returns boolean) |
 
 ### Command Management
 
