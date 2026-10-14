@@ -23,6 +23,7 @@ Growtopia Proxy is a free and open-source proxy for [Growtopia](https://growtopi
 - Works well with sub-server redirection.
 - Supports packet debugging and modification.
 - Auto collect for nearby dropped items (`/autocollect`).
+- Early roulette results: shows the number the moment you (or anyone) spin, before the wheel stops (`/roulette` to toggle).
 - Fast drop for locks without the amount dialog: `/wd <amount>` (World Lock), `/dd <amount>` (Diamond Lock), `/bd <amount>` (Blue Gem Lock).
 - Includes a configuration file for customization.
 - Support for new login system.

@@ -7,6 +7,7 @@
 
 #include "../command/commands/auto_collect_command.hpp"
 #include "../command/commands/drop_command.hpp"
+#include "../command/commands/roulette_command.hpp"
 #include "../packet/register_packets.hpp"
 #include "../scripting/bindings/command_bindings.hpp"
 #include "../scripting/bindings/event_bindings.hpp"
@@ -38,11 +39,13 @@ Core::Core()
     world_handler_ = std::make_unique<handlers::WorldHandler>(dispatcher_);
     auto_collect_handler_ = std::make_unique<handlers::AutoCollectHandler>(dispatcher_, *client_);
     drop_handler_ = std::make_unique<handlers::DropHandler>(dispatcher_, *client_, *server_, scheduler_, *auto_collect_handler_);
+    roulette_handler_ = std::make_unique<handlers::RouletteHandler>(dispatcher_, *server_);
     command_handler_ = std::make_unique<command::CommandHandler>(config_, dispatcher_, scheduler_, *server_, *client_);
     command_handler_->registry().add(std::make_unique<command::AutoCollectCommand>(*auto_collect_handler_));
     command_handler_->registry().add(std::make_unique<command::DropCommand>("wd", 242, "World Lock", *drop_handler_));
     command_handler_->registry().add(std::make_unique<command::DropCommand>("dd", 1796, "Diamond Lock", *drop_handler_));
     command_handler_->registry().add(std::make_unique<command::DropCommand>("bd", 7188, "Blue Gem Lock", *drop_handler_));
+    command_handler_->registry().add(std::make_unique<command::RouletteCommand>(*roulette_handler_));
 
     script_engine_ = std::make_unique<scripting::LuaEngine>();
 

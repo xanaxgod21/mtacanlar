@@ -70,7 +70,8 @@ end)
 
 Packets with a parsed type can also be listened to by name, e.g. `"OnSpawn"`,
 `"SendMapData"`, `"ItemChangeObject"`, `"State"` (player movement),
-`"ItemActivateObjectRequest"` (item pickup) or `"OnDialogRequest"` (dialogs).
+`"ItemActivateObjectRequest"` (item pickup), `"OnDialogRequest"` (dialogs),
+`"OnTalkBubble"`, `"OnConsoleMessage"` or `"OnTextOverlay"`.
 
 ## Command Registration
 

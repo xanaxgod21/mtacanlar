@@ -3,6 +3,7 @@
 #include "../packet/packet_types.hpp"
 #include "../packet/packet_variant.hpp"
 #include "../packet/game/dialog.hpp"
+#include "../packet/game/message.hpp"
 #include "../packet/game/player.hpp"
 #include "../packet/game/server.hpp"
 #include "../packet/game/world.hpp"
@@ -43,6 +44,9 @@ const std::unordered_map<std::string, packet::PacketId> PACKET_ID_MAP = {
     {"State", packet::PacketId::State},
     {"OnSuperMainStartAcceptLogon", packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a},
     {"OnDialogRequest", packet::PacketId::OnDialogRequest},
+    {"OnTalkBubble", packet::PacketId::OnTalkBubble},
+    {"OnConsoleMessage", packet::PacketId::OnConsoleMessage},
+    {"OnTextOverlay", packet::PacketId::OnTextOverlay},
 };
 }
 
@@ -183,6 +187,12 @@ void ScriptEventBridge::register_event_context_type()
                     return sol::make_object(s, static_cast<packet::game::State*>(ctx.packet.get()));
                 case packet::PacketId::OnDialogRequest:
                     return sol::make_object(s, static_cast<packet::game::OnDialogRequest*>(ctx.packet.get()));
+                case packet::PacketId::OnTalkBubble:
+                    return sol::make_object(s, static_cast<packet::game::OnTalkBubble*>(ctx.packet.get()));
+                case packet::PacketId::OnConsoleMessage:
+                    return sol::make_object(s, static_cast<packet::game::OnConsoleMessage*>(ctx.packet.get()));
+                case packet::PacketId::OnTextOverlay:
+                    return sol::make_object(s, static_cast<packet::game::OnTextOverlay*>(ctx.packet.get()));
                 case packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a:
                     return sol::make_object(s, static_cast<packet::game::OnSuperMainStartAcceptLogonHrdxs47254722215a*>(ctx.packet.get()));
                 case packet::PacketId::Unknown:
@@ -285,6 +295,9 @@ void try_fill_typed_context(packet::PacketId pid, const event::Event& event, scr
     case packet::PacketId::ItemActivateObjectRequest: fill_typed_context<packet::PacketId::ItemActivateObjectRequest>(event, ctx); break;
     case packet::PacketId::State: fill_typed_context<packet::PacketId::State>(event, ctx); break;
     case packet::PacketId::OnDialogRequest: fill_typed_context<packet::PacketId::OnDialogRequest>(event, ctx); break;
+    case packet::PacketId::OnTalkBubble: fill_typed_context<packet::PacketId::OnTalkBubble>(event, ctx); break;
+    case packet::PacketId::OnConsoleMessage: fill_typed_context<packet::PacketId::OnConsoleMessage>(event, ctx); break;
+    case packet::PacketId::OnTextOverlay: fill_typed_context<packet::PacketId::OnTextOverlay>(event, ctx); break;
     case packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a: fill_typed_context<packet::PacketId::OnSuperMainStartAcceptLogonHrdxs47254722215a>(event, ctx); break;
     default: break;
     }

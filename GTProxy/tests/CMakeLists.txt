@@ -13,6 +13,7 @@ add_executable(GTProxy_tests
     packet/test_text_packets.cpp
     utils/test_text_parse.cpp
     utils/test_byte_stream.cpp
+    utils/test_roulette.cpp
     world/test_object_finder.cpp)
 
 target_include_directories(GTProxy_tests PRIVATE

@@ -8,6 +8,7 @@
 #include "handlers/connection_handler.hpp"
 #include "handlers/drop_handler.hpp"
 #include "handlers/forwarding_handler.hpp"
+#include "handlers/roulette_handler.hpp"
 #include "handlers/world_handler.hpp"
 #include "../command/command_handler.hpp"
 #include "../network/client.hpp"
@@ -46,6 +47,7 @@ private:
     // Declared before command_handler_, whose commands reference them.
     std::unique_ptr<handlers::AutoCollectHandler> auto_collect_handler_;
     std::unique_ptr<handlers::DropHandler> drop_handler_;
+    std::unique_ptr<handlers::RouletteHandler> roulette_handler_;
     std::unique_ptr<command::CommandHandler> command_handler_;
 
     std::unique_ptr<scripting::LuaEngine> script_engine_;

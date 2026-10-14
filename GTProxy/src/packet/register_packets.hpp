@@ -3,6 +3,7 @@
 #include "register_packet_events.hpp"
 #include "game/dialog.hpp"
 #include "game/item_database.hpp"
+#include "game/message.hpp"
 #include "game/server.hpp"
 #include "game/world.hpp"
 #include "game/inventory.hpp"
@@ -50,6 +51,9 @@ inline bool register_all_packets()
     registry.register_packet<game::OnSpawn>();
     registry.register_packet<game::OnRemove>();
     registry.register_packet<game::OnDialogRequest>();
+    registry.register_packet<game::OnTalkBubble>();
+    registry.register_packet<game::OnConsoleMessage>();
+    registry.register_packet<game::OnTextOverlay>();
 
     event_registry::register_packet_events();
     return true;

@@ -4,6 +4,7 @@
 #include "../../packet/packet_variant.hpp"
 #include "../../packet/game/dialog.hpp"
 #include "../../packet/game/inventory.hpp"
+#include "../../packet/game/message.hpp"
 
 namespace scripting::bindings {
 void PacketBindings::bind(sol::state& lua)
@@ -308,6 +309,31 @@ void PacketBindings::bind_game_packets(sol::state& lua)
         "dialog", &packet::game::OnDialogRequest::dialog,
         "variant", &packet::game::OnDialogRequest::variant,
         "game_packet", &packet::game::OnDialogRequest::game_packet
+    );
+
+    lua.new_usertype<packet::game::OnTalkBubble>("OnTalkBubblePacket",
+        sol::constructors<packet::game::OnTalkBubble()>(),
+        sol::base_classes, sol::bases<packet::IPacket>(),
+        "net_id", &packet::game::OnTalkBubble::net_id,
+        "text", &packet::game::OnTalkBubble::text,
+        "variant", &packet::game::OnTalkBubble::variant,
+        "game_packet", &packet::game::OnTalkBubble::game_packet
+    );
+
+    lua.new_usertype<packet::game::OnConsoleMessage>("OnConsoleMessagePacket",
+        sol::constructors<packet::game::OnConsoleMessage()>(),
+        sol::base_classes, sol::bases<packet::IPacket>(),
+        "text", &packet::game::OnConsoleMessage::text,
+        "variant", &packet::game::OnConsoleMessage::variant,
+        "game_packet", &packet::game::OnConsoleMessage::game_packet
+    );
+
+    lua.new_usertype<packet::game::OnTextOverlay>("OnTextOverlayPacket",
+        sol::constructors<packet::game::OnTextOverlay()>(),
+        sol::base_classes, sol::bases<packet::IPacket>(),
+        "text", &packet::game::OnTextOverlay::text,
+        "variant", &packet::game::OnTextOverlay::variant,
+        "game_packet", &packet::game::OnTextOverlay::game_packet
     );
 
     lua.new_usertype<packet::game::State>("StatePacket",

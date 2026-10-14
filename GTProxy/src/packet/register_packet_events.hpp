@@ -4,6 +4,7 @@
 #include "game/server.hpp"
 #include "game/world.hpp"
 #include "game/item_database.hpp"
+#include "game/message.hpp"
 #include "game/inventory.hpp"
 #include "game/player.hpp"
 #include "message/chat.hpp"
@@ -94,6 +95,18 @@ inline void register_packet_events() {
     registry.register_event(
         PacketId::OnDialogRequest,
         make_event_builder<game::OnDialogRequest, PacketId::OnDialogRequest>()
+    );
+    registry.register_event(
+        PacketId::OnTalkBubble,
+        make_event_builder<game::OnTalkBubble, PacketId::OnTalkBubble>()
+    );
+    registry.register_event(
+        PacketId::OnConsoleMessage,
+        make_event_builder<game::OnConsoleMessage, PacketId::OnConsoleMessage>()
+    );
+    registry.register_event(
+        PacketId::OnTextOverlay,
+        make_event_builder<game::OnTextOverlay, PacketId::OnTextOverlay>()
     );
     registry.register_event(
         PacketId::SendItemDatabaseData,
