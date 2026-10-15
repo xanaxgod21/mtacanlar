@@ -40,6 +40,32 @@ jobs:
       - name: Build proxy
         run: cmake --build build --config Release --target ScarfaceProxy
 
+      - name: Verify exe is standalone
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem build -Recurse -Filter ScarfaceProxy.exe | Select-Object -First 1
+          if (-not $exe) { throw "ScarfaceProxy.exe not found under build" }
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vsPath\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dumpbin) { Write-Host 'dumpbin not found, skipping dependency check'; exit 0 }
+
+          $deps = & $dumpbin /DEPENDENTS $exe.FullName
+          Write-Host 'Imported DLLs:'
+          Write-Host ($deps -join "`n")
+
+          # These must NOT appear: they would mean the exe needs a DLL that is not
+          # on a clean Windows box (OpenSSL, the VC++ runtime, zlib, MinGW).
+          $forbidden = 'libssl|libcrypto|vcruntime|msvcp\d|concrt|zlib1|libgcc|libstdc\+\+|openssl'
+          $bad = $deps | Select-String -Pattern $forbidden
+          if ($bad) {
+            Write-Host "::error::Exe depends on non-system DLLs (not standalone):"
+            Write-Host ($bad -join "`n")
+            exit 1
+          }
+          Write-Host 'OK: exe only imports standard Windows system DLLs.'
+
       - name: Collect single exe
         shell: pwsh
         run: |
