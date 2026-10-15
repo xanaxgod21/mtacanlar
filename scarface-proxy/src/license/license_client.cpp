@@ -18,7 +18,8 @@
 #endif
 
 namespace license {
-namespace {
+// Reflected by glaze; must have external linkage (glaze 6.x + MSVC rejects
+// reflecting internal-linkage types), so declared at namespace scope.
 struct ActivateRequest {
     std::string key;
     std::string hwid;
@@ -26,6 +27,7 @@ struct ActivateRequest {
     std::string client_version;
 };
 
+namespace {
 constexpr std::chrono::seconds REQUEST_TIMEOUT{ 5 };
 
 [[nodiscard]] std::string trim(const std::string_view text)

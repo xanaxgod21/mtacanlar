@@ -9,7 +9,9 @@
 #include <openssl/evp.h>
 
 namespace license {
-namespace {
+// These structs are reflected by glaze. glaze 6.x on MSVC refuses to reflect a
+// type with internal linkage (error C7631), so they are declared at namespace
+// scope (external linkage) instead of inside the anonymous namespace below.
 // The signed part of an activation response.
 struct Payload {
     int v{ 0 };
@@ -30,6 +32,7 @@ struct ErrorResponse {
     std::string error;
 };
 
+namespace {
 constexpr glz::opts READ_OPTS{ .error_on_unknown_keys = false, .error_on_missing_keys = true };
 constexpr std::size_t PUBLIC_KEY_SIZE{ 32 };
 constexpr std::size_t SIGNATURE_SIZE{ 64 };
