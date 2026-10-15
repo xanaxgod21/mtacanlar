@@ -1,4 +1,5 @@
 #include <csignal>
+#include <iostream>
 #include <string>
 #include <spdlog/spdlog.h>
 
@@ -13,6 +14,27 @@
 #include "license/license_guard.hpp"
 
 std::unique_ptr<core::Core> g_core{ nullptr };
+
+namespace {
+// When the exe is double-clicked, Windows closes its console the instant the
+// program returns, so any error (a rejected key, an unreachable license server)
+// flashes by unread. Keep the window open in that case. Launched from an
+// existing terminal, the console has other processes attached, so skip the
+// wait. No-op on non-Windows.
+void pause_if_double_click()
+{
+#ifdef _WIN32
+    DWORD pids[2];
+    if (GetConsoleProcessList(pids, 2) > 1) {
+        return;
+    }
+
+    std::cout << "\nPress Enter to close..." << std::flush;
+    std::string discard;
+    std::getline(std::cin, discard);
+#endif
+}
+}
 
 void signal_handler(int signal)
 {
@@ -69,6 +91,7 @@ int main()
         if constexpr (license::ENABLED) {
             activation = license::check_on_startup();
             if (!activation) {
+                pause_if_double_click();
                 return 1;
             }
         }
@@ -112,5 +135,7 @@ int main()
 
     spdlog::info("{} stopped", core::branding::PRODUCT_NAME);
     spdlog::shutdown();
+
+    pause_if_double_click();
     return exit_code;
 }
