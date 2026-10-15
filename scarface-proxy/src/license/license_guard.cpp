@@ -48,9 +48,9 @@ std::optional<Activation> check_on_startup()
 
     LicenseClient client{ std::string{ SERVER_URL }, std::string{ PUBLIC_KEY }, *hwid };
 
-    core::Config config{};
-    auto& saved_key{ config.get_license_config().key };
-    std::string key{ normalize_key(saved_key) };
+    // The license key is asked for on every launch and never persisted, so
+    // there is no saved key to read here.
+    std::string key{};
 
     while (true) {
         if (key.empty()) {
@@ -69,11 +69,6 @@ std::optional<Activation> check_on_startup()
         const auto validated_at{ std::chrono::steady_clock::now() };
 
         if (result.status == Status::Ok) {
-            if (saved_key != key) {
-                saved_key = key;
-                std::ignore = config.save();
-            }
-
             if (result.expires_at == 0) {
                 spdlog::info("License valid (lifetime)");
             }
@@ -94,11 +89,6 @@ std::optional<Activation> check_on_startup()
         spdlog::error("License key rejected: {}", result.message);
         if (result.status == Status::HwidMismatch) {
             spdlog::info("Hardware ID of this computer: {}", format_hwid(client.get_hwid()));
-        }
-
-        if (!saved_key.empty()) {
-            saved_key.clear();
-            std::ignore = config.save();
         }
 
         key.clear();

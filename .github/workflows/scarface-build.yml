@@ -17,6 +17,11 @@ on:
           - Debug
           - RelWithDebInfo
           - MinSizeRel
+      licensed:
+        description: "Lisansli build (acilista key sorar)"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -32,7 +37,17 @@ jobs:
         run: pip install "conan>2.0"
 
       - name: Configure CMake
-        run: cmake -S scarface-proxy -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        shell: pwsh
+        run: |
+          $cmakeArgs = @('-S','scarface-proxy','-B','build',"-DCMAKE_BUILD_TYPE=$env:BUILD_TYPE")
+          if ('${{ inputs.licensed }}' -eq 'true') {
+            $cmakeArgs += '-DGTPROXY_LICENSE_SERVER=http://87.76.152.207:8080'
+            $cmakeArgs += '-DGTPROXY_LICENSE_PUBLIC_KEY=d5fac7022654e67e496c1c0d8959177ff7f074ded7f17d80b40c49bf48b23689'
+            Write-Host 'Building LICENSED (key required)'
+          } else {
+            Write-Host 'Building TEST (no license)'
+          }
+          cmake @cmakeArgs
 
       - name: Build proxy
         run: cmake --build build --config ${{ env.BUILD_TYPE }} --target ScarfaceProxy
