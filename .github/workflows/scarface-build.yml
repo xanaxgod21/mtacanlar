@@ -10,11 +10,11 @@ on:
       buildType:
         description: "Build Type"
         required: false
-        default: "MinSizeRel"
+        default: "Release"
         type: choice
         options:
-          - Debug
           - Release
+          - Debug
           - RelWithDebInfo
           - MinSizeRel
 
@@ -22,7 +22,7 @@ jobs:
   build:
     runs-on: windows-2022
     env:
-      BUILD_TYPE: ${{ inputs.buildType || 'MinSizeRel' }}
+      BUILD_TYPE: ${{ inputs.buildType || 'Release' }}
 
     steps:
       - name: Clone repository
