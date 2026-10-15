@@ -38,6 +38,11 @@ add_executable(${PROJECT_NAME}
     ${GTPROXY_INCLUDE_FILES}
     ${GTPROXY_SOURCE_FILES})
 
+# Embed the Windows application icon (file/taskbar icon for ScarfaceProxy.exe).
+if (WIN32)
+    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app_icon.rc)
+endif ()
+
 find_package(eventpp REQUIRED)
 find_package(fmt REQUIRED)
 find_package(glaze REQUIRED)
