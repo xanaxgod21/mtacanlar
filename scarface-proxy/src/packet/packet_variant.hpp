@@ -1,0 +1,191 @@
+#pragma once
+#include <string>
+#include <variant>
+#include <vector>
+#include <glm/glm.hpp>
+#include <spdlog/spdlog.h>
+#include <span>
+
+#include "../utils/byte_stream.hpp"
+
+namespace packet {
+enum class VariantType : std::uint8_t {
+    UNKNOWN,
+    FLOAT,
+    STRING,
+    VEC2,
+    VEC3,
+    UNSIGNED,
+    SIGNED = 9
+};
+
+using variant = std::variant<float, std::string, glm::vec2, glm::vec3, std::uint32_t, std::int32_t>;
+
+class PacketVariant {
+public:
+    PacketVariant()
+        : variants_{ std::vector<variant>{} }
+    { }
+
+    template<typename... Args>
+    explicit PacketVariant(const Args&... args)
+        : variants_{ { args... } }
+    { }
+
+    [[nodiscard]] static VariantType get_type(const variant& var)
+    {
+        switch (var.index()) {
+        case 0:
+            return VariantType::FLOAT;
+        case 1:
+            return VariantType::STRING;
+        case 2:
+            return VariantType::VEC2;
+        case 3:
+            return VariantType::VEC3;
+        case 4:
+            return VariantType::UNSIGNED;
+        case 5:
+            return VariantType::SIGNED;
+        default:
+            return VariantType::UNKNOWN;
+        }
+    }
+
+    [[nodiscard]] std::vector<std::byte> serialize() const
+    {
+        const size_t size{ variants_.size() };
+
+        utils::ByteStream<uint32_t> stream{};
+        stream.write<uint8_t>(size);
+
+        for (size_t i{ 0 }; i < size; i++) {
+            VariantType type{ get_type(variants_[i]) };
+
+            stream.write<uint8_t>(i);
+            stream.write(static_cast<std::underlying_type_t<VariantType>>(type));
+
+            if (type == VariantType::FLOAT) {
+                stream.write(std::get<float>(variants_[i]));
+            }
+            else if (type == VariantType::STRING) {
+                stream.write(std::get<std::string>(variants_[i]));
+            }
+            else if (type == VariantType::VEC2) {
+                const auto vec{ std::get<glm::vec2>(variants_[i]) };
+                stream.write(vec.x);
+                stream.write(vec.y);
+            }
+            else if (type == VariantType::VEC3) {
+                const auto vec{ std::get<glm::vec3>(variants_[i]) };
+                stream.write(vec.x);
+                stream.write(vec.y);
+                stream.write(vec.z);
+            }
+            else if (type == VariantType::UNSIGNED) {
+                stream.write(std::get<uint32_t>(variants_[i]));
+            }
+            else if (type == VariantType::SIGNED) {
+                stream.write(std::get<int32_t>(variants_[i]));
+            }
+        }
+
+        return stream.take_data();
+    }
+
+    [[nodiscard]] bool deserialize(std::span<const std::byte> data)
+    {
+        utils::ByteStream<uint32_t> byte_stream{ data };
+
+        uint8_t size{ 0 };
+        byte_stream.read(size);
+
+        if (size == 0) {
+            return false;
+        }
+
+        for (uint8_t i{ 0 }; i < size; i++) {
+            uint8_t index{ 0 };
+            byte_stream.read(index);
+
+            uint8_t type{ 0 };
+            byte_stream.read(type);
+
+            if (type == static_cast<uint8_t>(VariantType::FLOAT)) {
+                float value{ 0.0f };
+                byte_stream.read(value);
+                variants_.emplace_back(value);
+            }
+            else if (type == static_cast<uint8_t>(VariantType::STRING)) {
+                std::string value{};
+                byte_stream.read(value);
+                variants_.emplace_back(value);
+            }
+            else if (type == static_cast<uint8_t>(VariantType::VEC2)) {
+                glm::vec2 value{};
+                byte_stream.read(value.x);
+                byte_stream.read(value.y);
+                variants_.emplace_back(value);
+            }
+            else if (type == static_cast<uint8_t>(VariantType::VEC3)) {
+                glm::vec3 value{};
+                byte_stream.read(value.x);
+                byte_stream.read(value.y);
+                byte_stream.read(value.z);
+                variants_.emplace_back(value);
+            }
+            else if (type == static_cast<uint8_t>(VariantType::UNSIGNED)) {
+                uint32_t value{ 0 };
+                byte_stream.read(value);
+                variants_.emplace_back(value);
+            }
+            else if (type == static_cast<uint8_t>(VariantType::SIGNED)) {
+                int32_t value{ 0 };
+                byte_stream.read(value);
+                variants_.emplace_back(value);
+            }
+        }
+
+        return true;
+    }
+
+    template<typename T = std::string>
+    void add(const T& value)
+    {
+        variants_.emplace_back(value);
+    }
+
+    template <typename T = std::string>
+    [[nodiscard]] T get(const std::size_t index) const
+    {
+        if (index >= variants_.size()) {
+            spdlog::warn("PacketVariant::get() called with out-of-bounds index {} (size {})", index, variants_.size());
+            return T{};
+        }
+
+        try {
+            return std::get<T>(variants_[index]);
+        }
+        catch (const std::bad_variant_access& e) {
+            spdlog::warn("PacketVariant::get() type mismatch at index {}: {}", index, e.what());
+            return T{};
+        }
+    }
+
+    void set(const std::size_t index, const variant& value)
+    {
+        if (index >= variants_.size()) {
+            return;
+        }
+
+        variants_[index] = value;
+    }
+
+    [[nodiscard]] const std::vector<variant>& get_variants() const { return variants_; }
+    [[nodiscard]] std::span<const variant> variants() const { return variants_; }
+    [[nodiscard]] std::size_t size() const { return variants_.size(); }
+
+private:
+    std::vector<variant> variants_;
+};
+}

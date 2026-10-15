@@ -1,0 +1,166 @@
+#include "core.hpp"
+
+#include <chrono>
+#include <thread>
+#include <enet/enet.h>
+#include <spdlog/spdlog.h>
+
+#include "../command/commands/auto_collect_command.hpp"
+#include "../command/commands/balance_command.hpp"
+#include "../command/commands/drop_command.hpp"
+#include "../command/commands/spins_command.hpp"
+#include "../command/commands/toggle_command.hpp"
+#include "../command/commands/world_action_command.hpp"
+#include "../command/commands/wrench_command.hpp"
+#include "../command/commands/proxy_menu_command.hpp"
+#include "../command/commands/count_command.hpp"
+#include "../command/commands/collect_key_command.hpp"
+#include "../command/commands/rmode_command.hpp"
+#include "../item/locks.hpp"
+#include "../packet/register_packets.hpp"
+#include "../scripting/bindings/command_bindings.hpp"
+#include "../scripting/bindings/event_bindings.hpp"
+#include "../scripting/bindings/logger_bindings.hpp"
+#include "../scripting/bindings/packet_bindings.hpp"
+#include "../scripting/bindings/scheduler_bindings.hpp"
+#include "../scripting/bindings/player_bindings.hpp"
+#include "../scripting/bindings/world_bindings.hpp"
+#include "../scripting/bindings/world_data_bindings.hpp"
+#include "../scripting/bindings/item_bindings.hpp"
+
+namespace core {
+Core::Core()
+    : running_{ true }
+    , scheduler_{ std::make_shared<Scheduler>() }
+{
+    if (enet_initialize() != 0) {
+        throw std::runtime_error{ "Failed to initialize ENet" };
+    }
+
+    server_ = std::make_unique<network::Server>(config_, dispatcher_);
+    client_ = std::make_unique<network::Client>(config_, dispatcher_);
+    web_server_ = std::make_unique<WebServer>(config_, dispatcher_, *client_, *server_);
+
+    packet::register_all_packets();
+
+    connection_handler_ = std::make_unique<handlers::ConnectionHandler>(dispatcher_, *client_, *server_, config_);
+    forwarding_handler_ = std::make_unique<handlers::ForwardingHandler>(dispatcher_, *client_, *server_);
+    world_handler_ = std::make_unique<handlers::WorldHandler>(dispatcher_);
+    dialog_interceptor_ = std::make_unique<handlers::DialogInterceptor>(dispatcher_, scheduler_);
+    inventory_handler_ = std::make_unique<handlers::InventoryHandler>(dispatcher_);
+    auto_collect_handler_ = std::make_unique<handlers::AutoCollectHandler>(dispatcher_, *client_, config_);
+    hotkey_handler_ = std::make_unique<handlers::HotkeyHandler>(scheduler_, *auto_collect_handler_, *server_, config_);
+    pathfind_handler_ = std::make_unique<handlers::PathfindHandler>(dispatcher_, *client_, *server_, config_);
+    drop_handler_ = std::make_unique<handlers::DropHandler>(*client_, *server_, *dialog_interceptor_, *auto_collect_handler_);
+    world_manage_handler_ = std::make_unique<handlers::WorldManageHandler>(*client_, *server_, *dialog_interceptor_);
+    quick_wrench_handler_ = std::make_unique<handlers::QuickWrenchHandler>(dispatcher_, *server_, *world_manage_handler_, config_);
+    fast_drop_handler_ = std::make_unique<handlers::FastDropHandler>(dispatcher_, *client_, config_);
+    fun_facts_handler_ = std::make_unique<handlers::FunFactsHandler>(scheduler_, *server_, config_);
+    roulette_handler_ = std::make_unique<handlers::RouletteHandler>(dispatcher_, *server_, config_);
+    mod_alert_handler_ = std::make_unique<handlers::ModAlertHandler>(dispatcher_, *server_, config_);
+    proxy_menu_handler_ = std::make_unique<handlers::ProxyMenuHandler>(dispatcher_, *server_, *quick_wrench_handler_, *roulette_handler_, *mod_alert_handler_, *fun_facts_handler_, *fast_drop_handler_, *auto_collect_handler_, *hotkey_handler_, *pathfind_handler_);
+    command_handler_ = std::make_unique<command::CommandHandler>(config_, dispatcher_, scheduler_, *server_, *client_);
+    register_feature_commands();
+
+    script_engine_ = std::make_unique<scripting::LuaEngine>();
+
+    script_scheduler_ = std::make_unique<scripting::ScriptScheduler>(*script_engine_);
+
+    script_event_bridge_ = std::make_unique<scripting::ScriptEventBridge>(
+        dispatcher_,
+        *script_engine_,
+        *client_,
+        *server_
+    );
+
+    script_engine_->register_binding(std::make_unique<scripting::bindings::CommandBindings>(*command_handler_, *server_, *client_, dispatcher_, scheduler_));
+    script_engine_->register_binding(std::make_unique<scripting::bindings::EventBindings>(*script_event_bridge_));
+    script_engine_->register_binding(std::make_unique<scripting::bindings::LoggerBindings>());
+    script_engine_->register_binding(std::make_unique<scripting::bindings::PacketBindings>(*client_, *server_));
+    script_engine_->register_binding(std::make_unique<scripting::bindings::SchedulerBindings>(*script_scheduler_));
+    script_engine_->register_binding(std::make_unique<scripting::bindings::PlayerBindings>());
+    script_engine_->register_binding(std::make_unique<scripting::bindings::WorldBindings>());
+    script_engine_->register_binding(std::make_unique<scripting::bindings::WorldDataBindings>());
+    script_engine_->register_binding(std::make_unique<scripting::bindings::ItemBindings>());
+
+    script_loader_ = std::make_unique<scripting::ScriptLoader>(*script_engine_, "scripts");
+    script_loader_->load_all();
+
+    spdlog::info("Core initialized successfully");
+}
+
+void Core::register_feature_commands()
+{
+    using Action = handlers::WorldManageHandler::Action;
+    auto& registry{ command_handler_->registry() };
+
+    registry.add(std::make_unique<command::AutoCollectCommand>(*auto_collect_handler_));
+    registry.add(std::make_unique<command::BalanceCommand>());
+    registry.add(std::make_unique<command::DropCommand>("wd", item::locks::WORLD_LOCK, "World Lock", *drop_handler_));
+    registry.add(std::make_unique<command::DropCommand>("dd", item::locks::DIAMOND_LOCK, "Diamond Lock", *drop_handler_));
+    registry.add(std::make_unique<command::DropCommand>("bd", item::locks::BLUE_GEM_LOCK, "Blue Gem Lock", *drop_handler_));
+    registry.add(std::make_unique<command::WorldActionCommand>(Action::Pull, *world_manage_handler_));
+    registry.add(std::make_unique<command::WorldActionCommand>(Action::Kick, *world_manage_handler_));
+    registry.add(std::make_unique<command::WorldActionCommand>(Action::Ban, *world_manage_handler_));
+    registry.add(std::make_unique<command::WrenchCommand>(*quick_wrench_handler_));
+    registry.add(std::make_unique<command::ProxyMenuCommand>(*proxy_menu_handler_));
+    registry.add(std::make_unique<command::CountCommand>(*fast_drop_handler_));
+    registry.add(std::make_unique<command::CollectKeyCommand>(*hotkey_handler_));
+    registry.add(std::make_unique<command::ToggleCommand>(
+        "pathfind",
+        "Teleport to the tile you click",
+        "Pathfind teleport",
+        [this] { return pathfind_handler_->is_enabled(); },
+        [this](const bool enabled) { pathfind_handler_->set_enabled(enabled); }
+    ));
+    registry.add(std::make_unique<command::RmodeCommand>(*roulette_handler_));
+    registry.add(std::make_unique<command::SpinsCommand>(*roulette_handler_));
+    registry.add(std::make_unique<command::ToggleCommand>(
+        "roulette",
+        "Show roulette results before the wheel stops",
+        "Early roulette results",
+        [this] { return roulette_handler_->is_enabled(); },
+        [this](const bool enabled) { roulette_handler_->set_enabled(enabled); }
+    ));
+    registry.add(std::make_unique<command::ToggleCommand>(
+        "modalert",
+        "Warn when a moderator is in the world",
+        "Mod alert",
+        [this] { return mod_alert_handler_->is_enabled(); },
+        [this](const bool enabled) { mod_alert_handler_->set_enabled(enabled); }
+    ));
+}
+
+Core::~Core()
+{
+    enet_deinitialize();
+}
+
+void Core::run() const
+{
+    constexpr auto sleep_timer = std::chrono::microseconds{ 5000 };
+    auto prev = std::chrono::high_resolution_clock::now();
+    auto sleep_duration = sleep_timer;
+
+    while (running_) {
+        const auto now = std::chrono::high_resolution_clock::now();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now - prev);
+        prev = now;
+
+        sleep_duration += sleep_timer - elapsed;
+
+        server_->process();
+        client_->process();
+        scheduler_->run_main_thread_tasks();
+        script_scheduler_->update(elapsed);
+
+        if (sleep_duration > std::chrono::microseconds::zero()) {
+            std::this_thread::sleep_for(sleep_duration);
+        }
+
+        if (sleep_duration >= sleep_timer) {
+            sleep_duration = std::chrono::microseconds::zero();
+        }
+    }
+}
+}

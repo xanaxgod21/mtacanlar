@@ -1,0 +1,7 @@
+# Secrets and data: never commit
+*.pem
+*.db
+*.db-journal
+
+__pycache__/
+.venv/
