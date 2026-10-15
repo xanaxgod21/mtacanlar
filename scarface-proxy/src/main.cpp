@@ -8,6 +8,7 @@
 
 #include "core/branding.hpp"
 #include "core/core.hpp"
+#include "core/embedded_resources.hpp"
 #include "core/logger.hpp"
 #include "license/license_guard.hpp"
 
@@ -74,6 +75,10 @@ int main()
         else {
             spdlog::warn("License check disabled in this build");
         }
+
+        // Write the files the HTTPS web server needs if they are missing,
+        // so the proxy runs as a single exe.
+        core::ensure_embedded_resources();
 
         g_core = std::make_unique<core::Core>();
 
