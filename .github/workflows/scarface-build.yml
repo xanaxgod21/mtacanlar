@@ -30,7 +30,7 @@ jobs:
           $cmakeArgs = @('-S','scarface-proxy','-B','build','-DCMAKE_BUILD_TYPE=Release')
           if ('${{ matrix.variant }}' -eq 'licensed') {
             $cmakeArgs += '-DGTPROXY_LICENSE_SERVER=http://87.76.152.207:8080'
-            $cmakeArgs += '-DGTPROXY_LICENSE_PUBLIC_KEY=d5fac7022654e67e496c1c0d8959177ff7f074ded7f17d80b40c49bf48b23689'
+            $cmakeArgs += '-DGTPROXY_LICENSE_PUBLIC_KEY=979dc164b0a828e151e0898c10147c4cb7f598836c03d3254d5ec111094cf47c'
             Write-Host 'Variant: LICENSED (key required every launch)'
           } else {
             Write-Host 'Variant: TEST (no license)'
