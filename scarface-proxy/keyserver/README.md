@@ -71,6 +71,44 @@ python3 keyserver.py serve --port 443 --tls-cert fullchain.pem --tls-key privkey
 The proxy verifies the server certificate, so it must be valid for the hostname
 (a self-signed certificate will not work).
 
+## Discord bot
+
+`discord_bot.py` is an optional Discord bot that hands out and manages keys from the
+same `keys.db`, so run it on the same machine as `serve`. Install its extra dependency
+and configure it with a `bot.env` next to the script (copy `bot.env.example`):
+
+```sh
+pip install -r requirements-bot.txt
+cp bot.env.example bot.env   # then fill in DISCORD_TOKEN and GUILD_ID
+python3 discord_bot.py
+```
+
+On Windows you can instead run `kur.ps1` once (installs a `.venv`, creates the key
+database and asks for the bot token) and `baslat.ps1` to start it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\kur.ps1
+powershell -ExecutionPolicy Bypass -File .\baslat.ps1
+```
+
+`bot.env` and the generated `signing_key.pem` / `keys.db` hold secrets and are never
+committed (see `.gitignore`); keep `bot.env` private too.
+
+### Commands
+
+- `/key ...` (admins): `panel`, `ver`, `olustur`, `liste`, `bilgi`, `uye`, `iptal`,
+  `geri-ac`, `hwid-sifirla`, `uzat` — hand out and manage keys.
+- `/keylerim`, `/key-bagla`, `/hwid-sifirla` (members): self-service.
+- `/guncelleduyur` (admins): posts a "new exe is out" announcement. Options:
+  `surum` (version, e.g. `v3.1`), `notlar` (what changed), `dosya` (attach the exe —
+  if it is bigger than the server's Discord upload limit the announcement is posted
+  without it and you are asked to use a link instead), `link` (download link), and
+  `herkese` (`@everyone` ping). It posts to `ANNOUNCE_CHANNEL_ID` if set, otherwise to
+  the channel you run it in; `BANNER_URL` adds a banner image to the embed.
+
+So each time a new exe is built, download it from GitHub Actions and run
+`/guncelleduyur` to drop it (or its link) into your announcement channel.
+
 ## Building the proxy
 
 Pass the URL (no path) and the public key printed by `init`:

@@ -1,0 +1,6 @@
+Scarface Proxy derleme ayarlari (key sistemi acik)
+
+Public key: d5fac7022654e67e496c1c0d8959177ff7f074ded7f17d80b40c49bf48b23689
+
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DGTPROXY_LICENSE_SERVER=http://185.34.101.57:8080 -DGTPROXY_LICENSE_PUBLIC_KEY=d5fac7022654e67e496c1c0d8959177ff7f074ded7f17d80b40c49bf48b23689
+cmake --build build --config Release
