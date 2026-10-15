@@ -16,6 +16,46 @@
 std::unique_ptr<core::Core> g_core{ nullptr };
 
 namespace {
+// True once ANSI colour escape sequences are known to render (always on
+// non-Windows; on Windows only after virtual-terminal mode is enabled).
+bool g_ansi{
+#ifdef _WIN32
+    false
+#else
+    true
+#endif
+};
+
+// Make the console show the UTF-8 logo and ANSI colours.
+void setup_console()
+{
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+    if (const HANDLE out{ GetStdHandle(STD_OUTPUT_HANDLE) }; out && out != INVALID_HANDLE_VALUE) {
+        DWORD mode{ 0 };
+        if (GetConsoleMode(out, &mode)
+            && SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+            g_ansi = true;
+        }
+    }
+#endif
+}
+
+// The Scarface logo + tagline, shown above the license-key prompt.
+void print_banner()
+{
+    const char* red{ g_ansi ? "\x1b[1;91m" : "" };
+    const char* white{ g_ansi ? "\x1b[1;97m" : "" };
+    const char* gray{ g_ansi ? "\x1b[90m" : "" };
+    const char* reset{ g_ansi ? "\x1b[0m" : "" };
+
+    std::cout << '\n'
+              << red << core::branding::LOGO << reset << '\n'
+              << "          " << white << "PROXY " << core::branding::VERSION << reset
+              << "   " << gray << '"' << core::branding::TAGLINE << '"' << reset
+              << "\n\n" << std::flush;
+}
+
 // When the exe is double-clicked, Windows closes its console the instant the
 // program returns, so any error (a rejected key, an unreachable license server)
 // flashes by unread. Keep the window open in that case. Launched from an
@@ -51,6 +91,8 @@ int main()
 #ifdef _WIN32
     SetConsoleTitleA(std::string{ core::branding::PRODUCT_NAME }.c_str());
 #endif
+    setup_console();
+    print_banner();
 
     try {
         core::Logger logger{};
