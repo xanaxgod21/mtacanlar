@@ -9,6 +9,7 @@
 #include "auto_collect_handler.hpp"
 #include "hotkey_handler.hpp"
 #include "pathfind_handler.hpp"
+#include "version_handler.hpp"
 #include "../../event/event.hpp"
 #include "../../network/server.hpp"
 
@@ -28,7 +29,8 @@ public:
         FastDropHandler& fast_drop,
         AutoCollectHandler& auto_collect,
         HotkeyHandler& hotkey,
-        PathfindHandler& pathfind
+        PathfindHandler& pathfind,
+        VersionHandler& version
     );
 
     ProxyMenuHandler(const ProxyMenuHandler&) = delete;
@@ -57,6 +59,7 @@ private:
     AutoCollectHandler& auto_collect_;
     HotkeyHandler& hotkey_;
     PathfindHandler& pathfind_;
+    VersionHandler& version_;
 
     event::ScopedHandle handle_;
 };

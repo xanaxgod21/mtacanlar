@@ -14,6 +14,7 @@
 #include "message/wrench.hpp"
 #include "message/dialog_return.hpp"
 #include "message/server_hello.hpp"
+#include "message/login.hpp"
 
 namespace packet {
 inline bool register_all_packets()
@@ -34,6 +35,7 @@ inline bool register_all_packets()
     registry.register_packet<message::JoinRequest>();
     registry.register_packet<message::ValidateWorld>();
     registry.register_packet<message::Input>();
+    registry.register_packet<message::LoginRequest>();
     registry.register_packet<message::Wrench>();
     registry.register_packet<message::DialogReturn>();
     registry.register_packet<message::Log>();

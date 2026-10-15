@@ -64,6 +64,7 @@ public:
 public:
     [[nodiscard]] const ServerConfig& get_server_config() const { return config_.server; }
     [[nodiscard]] const ClientConfig& get_client_config() const { return config_.client; }
+    [[nodiscard]] ClientConfig& get_client_config() { return config_.client; }
     [[nodiscard]] const LogConfig& get_log_config() const { return config_.log; }
     [[nodiscard]] const CommandConfig& get_command_config() const { return config_.command; }
     [[nodiscard]] const FeatureConfig& get_feature_config() const { return config_.features; }

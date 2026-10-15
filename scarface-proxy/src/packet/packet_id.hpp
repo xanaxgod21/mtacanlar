@@ -16,6 +16,7 @@ enum class PacketId : std::uint32_t {
     JoinRequest,
     ValidateWorld,
     Input,
+    LoginRequest,
     Log,
     OnNameChanged,
     OnChangeSkin,
@@ -71,6 +72,12 @@ inline std::vector<TextRegexPattern>& get_text_regex_patterns()
         p.emplace_back(R"(^action\|wrench(?:\n|$))", PacketId::Wrench);
         p.emplace_back(R"(^action\|dialog_return(?:\n|$))", PacketId::DialogReturn);
         p.emplace_back(R"(^action\|log(?:\n|$))", PacketId::Log);
+        // The client's login blob carries "game_version|X.XX" and "protocol|NNN".
+        // It has no "action|" line, so it only reaches here after the ones above;
+        // matching on game_version keeps detection working even if GT reorders
+        // the login fields. The packet is read for its version only, never
+        // cancelled, so the original bytes are still forwarded to the server.
+        p.emplace_back(R"(game_version\|)", PacketId::LoginRequest);
         return p;
     }();
     return patterns;

@@ -34,7 +34,8 @@ ProxyMenuHandler::ProxyMenuHandler(
     FastDropHandler& fast_drop,
     AutoCollectHandler& auto_collect,
     HotkeyHandler& hotkey,
-    PathfindHandler& pathfind
+    PathfindHandler& pathfind,
+    VersionHandler& version
 )
     : dispatcher_{ dispatcher }
     , server_{ server }
@@ -46,6 +47,7 @@ ProxyMenuHandler::ProxyMenuHandler(
     , auto_collect_{ auto_collect }
     , hotkey_{ hotkey }
     , pathfind_{ pathfind }
+    , version_{ version }
 {
     handle_ = event::ScopedHandle{
         dispatcher_,
@@ -59,6 +61,9 @@ std::string ProxyMenuHandler::build_dialog() const
     std::string d{};
     d += "set_default_color|`o\n";
     d += "add_label_with_icon|big|`wScarface Proxy``|left|32|\n";
+    if (const auto& gv{ version_.get_game_version() }; !gv.empty()) {
+        d += fmt::format("add_textbox|`oGrowtopia v{} `7(protocol {})``|left|\n", gv, version_.get_protocol());
+    }
     d += "add_spacer|small|\n";
     d += fmt::format("add_checkbox|cb_wrench|`wWrench Pull``|{}\n", onoff(quick_wrench_.is_enabled()));
     d += fmt::format("add_checkbox|cb_spin|`wShow Real/Fake Spin``|{}\n", onoff(roulette_.is_enabled()));

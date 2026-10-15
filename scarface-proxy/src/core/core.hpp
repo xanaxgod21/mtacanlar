@@ -19,6 +19,7 @@
 #include "handlers/hotkey_handler.hpp"
 #include "handlers/pathfind_handler.hpp"
 #include "handlers/fun_facts_handler.hpp"
+#include "handlers/version_handler.hpp"
 #include "handlers/proxy_menu_handler.hpp"
 #include "../command/command_handler.hpp"
 #include "../network/client.hpp"
@@ -56,6 +57,7 @@ private:
 
     std::unique_ptr<handlers::ConnectionHandler> connection_handler_;
     std::unique_ptr<handlers::ForwardingHandler> forwarding_handler_;
+    std::unique_ptr<handlers::VersionHandler> version_handler_;
     std::unique_ptr<handlers::WorldHandler> world_handler_;
     // Declared before command_handler_, whose commands reference them.
     std::unique_ptr<handlers::DialogInterceptor> dialog_interceptor_;

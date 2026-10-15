@@ -13,6 +13,7 @@
 #include "message/wrench.hpp"
 #include "message/dialog_return.hpp"
 #include "message/server_hello.hpp"
+#include "message/login.hpp"
 
 namespace packet::event_registry {
 inline void register_packet_events() {
@@ -42,6 +43,10 @@ inline void register_packet_events() {
     registry.register_event(
         PacketId::Input,
         make_event_builder<message::Input, PacketId::Input>()
+    );
+    registry.register_event(
+        PacketId::LoginRequest,
+        make_event_builder<message::LoginRequest, PacketId::LoginRequest>()
     );
     registry.register_event(
         PacketId::Wrench,
