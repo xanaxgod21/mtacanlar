@@ -6,28 +6,16 @@ on:
       - 'scarface-proxy/**'
       - '.github/workflows/scarface-build.yml'
   workflow_dispatch:
-    inputs:
-      buildType:
-        description: "Build Type"
-        required: false
-        default: "Release"
-        type: choice
-        options:
-          - Release
-          - Debug
-          - RelWithDebInfo
-          - MinSizeRel
-      licensed:
-        description: "Lisansli build (acilista key sorar)"
-        required: false
-        default: false
-        type: boolean
 
 jobs:
   build:
     runs-on: windows-2022
-    env:
-      BUILD_TYPE: ${{ inputs.buildType || 'Release' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # test     = no license check (open without a key, for testing)
+        # licensed = key required on every launch (the exe you hand to customers)
+        variant: [test, licensed]
 
     steps:
       - name: Clone repository
@@ -39,35 +27,35 @@ jobs:
       - name: Configure CMake
         shell: pwsh
         run: |
-          $cmakeArgs = @('-S','scarface-proxy','-B','build',"-DCMAKE_BUILD_TYPE=$env:BUILD_TYPE")
-          if ('${{ inputs.licensed }}' -eq 'true') {
+          $cmakeArgs = @('-S','scarface-proxy','-B','build','-DCMAKE_BUILD_TYPE=Release')
+          if ('${{ matrix.variant }}' -eq 'licensed') {
             $cmakeArgs += '-DGTPROXY_LICENSE_SERVER=http://87.76.152.207:8080'
             $cmakeArgs += '-DGTPROXY_LICENSE_PUBLIC_KEY=d5fac7022654e67e496c1c0d8959177ff7f074ded7f17d80b40c49bf48b23689'
-            Write-Host 'Building LICENSED (key required)'
+            Write-Host 'Variant: LICENSED (key required every launch)'
           } else {
-            Write-Host 'Building TEST (no license)'
+            Write-Host 'Variant: TEST (no license)'
           }
           cmake @cmakeArgs
 
       - name: Build proxy
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} --target ScarfaceProxy
+        run: cmake --build build --config Release --target ScarfaceProxy
 
-      - name: Collect output
+      - name: Collect single exe
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path output | Out-Null
           $exe = Get-ChildItem build -Recurse -Filter ScarfaceProxy.exe | Select-Object -First 1
           if (-not $exe) { throw "ScarfaceProxy.exe not found under build" }
           Copy-Item $exe.FullName output
-          $dir = $exe.Directory.FullName
-          if (Test-Path "$dir\resources") { Copy-Item "$dir\resources" output -Recurse -Force }
-          if (Test-Path "$dir\scripts")   { Copy-Item "$dir\scripts"   output -Recurse -Force }
+          # Everything is linked statically, so there are normally no DLLs; copy
+          # any that appear just in case. The exe writes resources/cert.pem and
+          # resources/key.pem itself on first run, so nothing else is shipped.
           Get-ChildItem build -Recurse -Filter *.dll | Copy-Item -Destination output -Force
-          Write-Host "Output contents:"
-          Get-ChildItem output -Recurse | Select-Object FullName
+          Write-Host 'Artifact contents:'
+          Get-ChildItem output -Recurse | Select-Object Name, Length
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ScarfaceProxy-${{ env.BUILD_TYPE }}
+          name: ScarfaceProxy-${{ matrix.variant }}
           path: output
