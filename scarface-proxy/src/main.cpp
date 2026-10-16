@@ -10,10 +10,14 @@
 #include "core/branding.hpp"
 #include "core/core.hpp"
 #include "core/embedded_resources.hpp"
+#include "core/hosts_redirect.hpp"
 #include "core/logger.hpp"
 #include "license/license_guard.hpp"
 
 std::unique_ptr<core::Core> g_core{ nullptr };
+// Non-owning; points at the stack object in main() while the proxy runs, so the
+// console-close handler can undo the hosts redirect before Windows kills us.
+core::HostsRedirect* g_hosts{ nullptr };
 
 namespace {
 // True once ANSI colour escape sequences are known to render (always on
@@ -85,6 +89,31 @@ void signal_handler(int signal)
     spdlog::info("Interrupted by signal {}, stopping...", signal);
     g_core->stop();
 }
+
+#ifdef _WIN32
+// Also fires when the user clicks the console's X button or logs off, which
+// std::signal does not catch. Undo the hosts redirect first so the machine is
+// never left pointing Growtopia at a proxy that is no longer running.
+BOOL WINAPI console_ctrl_handler(const DWORD ctrl_type)
+{
+    switch (ctrl_type) {
+    case CTRL_C_EVENT:
+    case CTRL_BREAK_EVENT:
+    case CTRL_CLOSE_EVENT:
+    case CTRL_LOGOFF_EVENT:
+    case CTRL_SHUTDOWN_EVENT:
+        if (g_hosts) {
+            g_hosts->restore();
+        }
+        if (g_core) {
+            g_core->stop();
+        }
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+#endif
 
 int main()
 {
@@ -160,7 +189,19 @@ int main()
         std::signal(SIGINT, signal_handler);
         std::signal(SIGTERM, signal_handler);
 
+        // Route Growtopia through the proxy automatically (and undo it on exit),
+        // so the user never has to edit the hosts file by hand. Done after the
+        // core is up, so 127.0.0.1 is already listening.
+        core::HostsRedirect hosts_redirect{};
+        g_hosts = &hosts_redirect;
+#ifdef _WIN32
+        SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+#endif
+
         g_core->run();
+
+        g_hosts = nullptr;
+        hosts_redirect.restore();
     }
     catch (const std::runtime_error& e) {
         spdlog::error("Runtime error: {}", e.what());

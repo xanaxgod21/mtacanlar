@@ -79,9 +79,13 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/lib/libressl/include)
 
 if (MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE 
+    target_compile_options(${PROJECT_NAME} PRIVATE
         /EHsc
         /bigobj)
+    # Request administrator rights in the exe manifest so it can edit the hosts
+    # file (to route Growtopia through the proxy with no manual setup) and bind
+    # port 443. Windows then shows the UAC prompt automatically on launch.
+    target_link_options(${PROJECT_NAME} PRIVATE "/MANIFESTUAC:level='requireAdministrator'")
 else ()
     target_compile_options(${PROJECT_NAME} PRIVATE
         -fexceptions)
